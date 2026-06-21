@@ -558,8 +558,10 @@ def main() -> None:
     )
 
     fields = gpd.read_file(_REPO / config.field_boundary_path)
-    soil_full = pd.read_csv(farm_ssurgo_full_path(_DEFAULT_GROWER, _DEFAULT_FARM))
-    soil_summary = pd.read_csv(farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM))
+    soil_path = farm_ssurgo_full_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+    soil_full = pd.read_csv(soil_path) if soil_path.exists() else pd.DataFrame()
+    soil_summary_path = farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+    soil_summary = pd.read_csv(soil_summary_path) if soil_summary_path.exists() else pd.DataFrame()
     weather = pd.read_csv(
         farm_weather_path(_DEFAULT_GROWER, _DEFAULT_FARM), parse_dates=["date"]
     )
