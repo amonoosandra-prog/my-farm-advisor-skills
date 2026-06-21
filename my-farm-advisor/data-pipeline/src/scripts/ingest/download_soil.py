@@ -326,11 +326,12 @@ def main():
                 farm_slug=farm_slug,
                 force=force,
             )
-
-    print(
-        f"\n✓ Downloaded {len(soil_data)} soil records for {soil_data['field_id'].nunique()} fields"
-    )
-    print(f"  Output: {farm_sample_output}")
+        print(
+            f"\n\u2713 Downloaded {len(soil_data)} soil records for {soil_data['field_id'].nunique()} fields"
+        )
+        print(f"  Output: {farm_sample_output}")
+    else:
+        print("  \u26a0 No soil records downloaded; SSURGO data not available for these fields")
 
     return soil_data
 
