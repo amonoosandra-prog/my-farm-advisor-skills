@@ -106,11 +106,15 @@ def _query_overpass_bbox(bbox: tuple[float, float, float, float]) -> dict:
     );
     out geom;
     """
+    _UA = "MyFarmAdvisorPipeline/1.0 (https://github.com/amonoosandra-prog/my-farm-advisor-skills)"
     last_error: Exception | None = None
     for endpoint in OVERPASS_URLS:
         for attempt in range(1, 4):
             try:
-                response = requests.post(endpoint, data={"data": query}, timeout=240)
+                response = requests.post(
+                    endpoint, data={"data": query}, timeout=240,
+                    headers={"User-Agent": _UA}
+                )
                 response.raise_for_status()
                 return response.json()
             except Exception as exc:
