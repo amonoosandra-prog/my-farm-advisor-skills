@@ -590,7 +590,7 @@ def plot_storyline(
     ax.plot(ydf["doy"], ydf["gdd_cumul"], color=color, linewidth=1.8,
             alpha=0.85, label=f"{year} ({crop})")
     
-    ax.set_xlabel("Day of Year", fontsize=11, fontweight="bold")
+    ax.set_xlabel("Shared growing season timeline", fontsize=11, fontweight="bold")
     ax.set_ylabel("Cumulative GDD (°C-days, base 10°C)", fontsize=11, fontweight="bold")
     ax.set_title(f"4. Cumulative Growing Degree Days — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
