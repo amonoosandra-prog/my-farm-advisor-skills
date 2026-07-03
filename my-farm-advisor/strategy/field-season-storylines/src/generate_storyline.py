@@ -129,6 +129,94 @@ def compute_gdd(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ── Data validation ─────────────────────────────────────────────────
+
+def validate_data(weather_df: pd.DataFrame, ndvi_df: pd.DataFrame,
+                  field_id: str) -> dict:
+    """Check for missing or sparse dates and return a validation report."""
+    report = {"status": "pass", "warnings": [], "field_id": field_id}
+    
+    for year in range(2021, 2026):
+        # Weather completeness
+        wdf = weather_df[weather_df["date"].dt.year == year]
+        gs = wdf[wdf["date"].dt.month.isin(GS_MONTHS)]
+        
+        if not gs.empty:
+            date_range = pd.date_range(
+                start=gs["date"].min(), end=gs["date"].max(), freq="D"
+            )
+            missing_dates = date_range.difference(gs["date"])
+            if len(missing_dates) > 3:
+                report["warnings"].append(
+                    f"{year}: {len(missing_dates)} missing weather dates"
+                )
+                report["status"] = "warn"
+            
+            for col in ["T2M", "T2M_MAX", "T2M_MIN", "PRECTOTCORR"]:
+                n_nan = gs[col].isna().sum()
+                if n_nan > 0:
+                    report["warnings"].append(
+                        f"{year}: {n_nan} NaN values in {col}"
+                    )
+                    report["status"] = "warn"
+        
+        # NDVI completeness
+        ndvi_yr = ndvi_df[ndvi_df["year"] == year]
+        gs_ndvi = ndvi_yr[ndvi_yr["date"].dt.month.isin(GS_MONTHS)]
+        
+        if len(gs_ndvi) < 3:
+            report["warnings"].append(
+                f"{year}: Only {len(gs_ndvi)} growing-season NDVI scenes (sparse)"
+            )
+            report["status"] = "warn"
+        
+        # Check peak-season coverage (Jun–Aug)
+        peak = ndvi_yr[ndvi_yr["date"].dt.month.isin([6, 7, 8])]
+        if peak.empty:
+            report["warnings"].append(
+                f"{year}: No NDVI scenes in Jun–Aug (missing peak)"
+            )
+            report["status"] = "warn"
+    
+    return report
+
+
+def compute_growing_season_window(weather_df: pd.DataFrame,
+                                  ndvi_df: pd.DataFrame) -> tuple[int, int]:
+    """Compute shared DOY window from actual data across all years."""
+    all_doy = []
+    
+    for year in range(2021, 2026):
+        wdf = weather_df[weather_df["date"].dt.year == year]
+        gs = wdf[wdf["date"].dt.month.isin(GS_MONTHS)]
+        if not gs.empty:
+            all_doy.extend(gs["date"].dt.dayofyear.tolist())
+        
+        ndvi_yr = ndvi_df[ndvi_df["year"] == year]
+        if not ndvi_yr.empty:
+            all_doy.extend(ndvi_yr["date"].dt.dayofyear.tolist())
+    
+    if not all_doy:
+        return (60, 330)  # Fallback
+    
+    doy_min = max(min(all_doy) - 10, 1)
+    doy_max = min(max(all_doy) + 10, 366)
+    return (doy_min, doy_max)
+
+
+def format_doy_axis(ax, doy_range: tuple[int, int]):
+    """Format x-axis with month labels aligned to DOY."""
+    month_doy = {
+        91: "Apr", 121: "May", 152: "Jun",
+        182: "Jul", 213: "Aug", 244: "Sep", 274: "Oct",
+    }
+    ticks = [doy for doy in month_doy if doy_range[0] <= doy <= doy_range[1]]
+    labels = [month_doy[t] for t in ticks]
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels)
+    ax.set_xlim(doy_range)
+
+
 # ── CDL crop labels ─────────────────────────────────────────────────
 
 def read_crop_labels(grower: str, farm: str, field: str) -> dict[int, str]:
@@ -263,8 +351,13 @@ def detect_notable_events(ndvi_df: pd.DataFrame, weather_df: pd.DataFrame,
         ndvi_year["ndvi_diff"] = ndvi_year["mean_ndvi"].diff()
         ndvi_year["doy"] = ndvi_year["date"].dt.dayofyear
         
+        # Data-relative thresholds for this field-year
+        ndvi_range = ndvi_year["mean_ndvi"].max() - ndvi_year["mean_ndvi"].min()
+        greenup_threshold = max(0.15, ndvi_range * 0.25)
+        dip_threshold = max(0.08, ndvi_range * 0.15)
+        
         # Rapid green-up — only the largest per year
-        greenup = ndvi_year[ndvi_year["ndvi_diff"] >= NDVI_GREENUP_DELTA]
+        greenup = ndvi_year[ndvi_year["ndvi_diff"] >= greenup_threshold]
         if not greenup.empty:
             max_row = greenup.loc[greenup["ndvi_diff"].idxmax()]
             events.append({
@@ -274,7 +367,7 @@ def detect_notable_events(ndvi_df: pd.DataFrame, weather_df: pd.DataFrame,
             })
         
         # NDVI dip — only the largest per year
-        dip = ndvi_year[ndvi_year["ndvi_diff"] <= -NDVI_DIP_DELTA]
+        dip = ndvi_year[ndvi_year["ndvi_diff"] <= -dip_threshold]
         if not dip.empty:
             min_row = dip.loc[dip["ndvi_diff"].idxmin()]
             events.append({
@@ -300,7 +393,8 @@ def detect_notable_events(ndvi_df: pd.DataFrame, weather_df: pd.DataFrame,
 
 # ── Dashboard plotting ──────────────────────────────────────────────
 
-def annotate_panel(ax, events, panel_name, year_colors, year_map, max_annotations=2):
+def annotate_panel(ax, events, panel_name, year_colors, year_map,
+                   doy_range=(60, 330), max_annotations=2):
     """Add annotations to a single panel, limiting to top events per year."""
     panel_events = [ev for ev in events if ev["panel"] == panel_name]
     
@@ -328,16 +422,16 @@ def annotate_panel(ax, events, panel_name, year_colors, year_map, max_annotation
                 else:
                     y = val
                     offset_y = 0.05
-                # Stagger x positions to avoid overlap
-                offset_x = 10 + (i * 8)
+                # Keep annotations within doy_range
+                offset_x = min(15 + (i * 8), doy_range[1] - doy - 5)
             elif panel_name == "temp":
                 y = val if ev["type"] == "hot_day" else 30
                 offset_y = 2 + (i * 1.5)
-                offset_x = 8 + (i * 6)
+                offset_x = min(12 + (i * 6), doy_range[1] - doy - 5)
             elif panel_name == "precip":
                 y = val if ev["type"] == "heavy_rain" else 20
                 offset_y = 5 + (i * 3)
-                offset_x = 8 + (i * 6)
+                offset_x = min(12 + (i * 6), doy_range[1] - doy - 5)
             else:
                 continue
             
@@ -382,8 +476,12 @@ def plot_storyline(
     output_path: Path,
     events: list[dict] | None = None,
     strategy_wording: dict[str, str] | None = None,
+    doy_range: tuple[int, int] | None = None,
 ) -> None:
     """Generate enhanced multi-panel storyline dashboard with event annotations."""
+    
+    if doy_range is None:
+        doy_range = compute_growing_season_window(weather_df, ndvi_df)
     
     fig = plt.figure(figsize=(16, 20))
     gs = gridspec.GridSpec(5, 1, height_ratios=[0.06, 1, 1, 1, 1],
@@ -428,14 +526,14 @@ def plot_storyline(
                 alpha=0.5, zorder=2)
     
     if events:
-        annotate_panel(ax, events, "ndvi", YEAR_COLORS, YEAR_MAP)
+        annotate_panel(ax, events, "ndvi", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax.set_ylabel("Mean NDVI", fontsize=11, fontweight="bold")
     ax.set_title("NDVI Time Series — Sentinel-2 Scenes", fontsize=12, fontweight="bold", pad=8)
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.set_ylim(0, 1.0)
     ax.grid(True, alpha=0.15)
-    ax.set_xlim(60, 330)
+    format_doy_axis(ax, doy_range)
     
     # ── Panel 2: Daily Temperature ──
     ax = ax_temp
@@ -453,13 +551,13 @@ def plot_storyline(
                label="30°C heat stress")
     
     if events:
-        annotate_panel(ax, events, "temp", YEAR_COLORS, YEAR_MAP)
+        annotate_panel(ax, events, "temp", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax.set_ylabel("Temperature (°C)", fontsize=11, fontweight="bold")
     ax.set_title("Daily Temperature — Growing Season", fontsize=12, fontweight="bold", pad=8)
     ax.legend(fontsize=8, ncol=3, loc="upper right")
     ax.grid(True, alpha=0.15)
-    ax.set_xlim(60, 330)
+    format_doy_axis(ax, doy_range)
     
     # ── Panel 3: Daily Precipitation ──
     ax_precip_panel = ax_precip
@@ -477,14 +575,14 @@ def plot_storyline(
                       linestyle="--", alpha=0.6)
     
     if events:
-        annotate_panel(ax_precip_panel, events, "precip", YEAR_COLORS, YEAR_MAP)
+        annotate_panel(ax_precip_panel, events, "precip", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax_precip_panel.set_ylabel("Daily precip (mm)", fontsize=11, fontweight="bold")
     ax_cumul.set_ylabel("Cumulative (mm)", fontsize=10, color="#555")
     ax_precip_panel.set_title("Daily Precipitation — Growing Season", fontsize=12,
                                fontweight="bold", pad=8)
     ax_precip_panel.grid(True, alpha=0.15)
-    ax_precip_panel.set_xlim(60, 330)
+    format_doy_axis(ax_precip_panel, doy_range)
     
     # ── Panel 4: Cumulative GDD ──
     ax = ax_gdd
@@ -502,7 +600,7 @@ def plot_storyline(
     ax.set_title("Cumulative Growing Degree Days", fontsize=12, fontweight="bold", pad=8)
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.grid(True, alpha=0.15)
-    ax.set_xlim(60, 330)
+    format_doy_axis(ax, doy_range)
     
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -555,7 +653,22 @@ def main():
     for year, crop in sorted(crop_labels.items()):
         print(f"   {year}: {crop}")
     
-    # 4. Load optional strategy wording
+    # 4. Validate data completeness
+    print("\n4. Validating data completeness...")
+    validation = validate_data(weather_df, ndvi_df, field_id)
+    print(f"   Status: {validation['status']}")
+    if validation["warnings"]:
+        for w in validation["warnings"]:
+            print(f"   ⚠ {w}")
+    else:
+        print("   ✓ All checks passed")
+    
+    # 5. Compute shared growing-season window
+    print("\n5. Computing growing-season DOY window...")
+    doy_range = compute_growing_season_window(weather_df, ndvi_df)
+    print(f"   DOY range: {doy_range[0]}–{doy_range[1]}")
+    
+    # 6. Load optional strategy wording
     strategy_wording = {}
     if args.strategy_guide:
         strategy_path = Path(args.strategy_guide)
@@ -566,18 +679,19 @@ def main():
         else:
             print("   No strategy phrases found, using generic wording")
     
-    # 5. Detect notable events
-    print("\n5. Detecting notable events...")
+    # 7. Detect notable events
+    print("\n7. Detecting notable events...")
     events = detect_notable_events(ndvi_df, weather_df, crop_labels)
     print(f"   Detected {len(events)} events")
     for ev in sorted(events, key=lambda e: (e["year"], e["doy"])):
         print(f"    {ev['year']} DOY {ev['doy']:3d} [{ev['severity']:>6}] {ev['label']}")
     
-    # 6. Generate dashboard with annotations
-    print("\n6. Generating enhanced storyline dashboard...")
+    # 8. Generate dashboard with annotations
+    print("\n8. Generating enhanced storyline dashboard...")
     dashboard_path = out_dir / f"{field_id}_storyline.png"
     plot_storyline(ndvi_df, weather_df, crop_labels, field_id, dashboard_path,
-                   events=events, strategy_wording=strategy_wording)
+                   events=events, strategy_wording=strategy_wording,
+                   doy_range=doy_range)
     
     # Summary
     print("\n" + "=" * 60)
