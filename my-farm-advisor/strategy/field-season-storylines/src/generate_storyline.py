@@ -473,6 +473,7 @@ def plot_storyline(
     weather_df: pd.DataFrame,
     crop_labels: dict[int, str],
     field_id: str,
+    year: int,
     output_path: Path,
     events: list[dict] | None = None,
     strategy_wording: dict[str, str] | None = None,
@@ -509,27 +510,24 @@ def plot_storyline(
                       edgecolor="#dee2e6", linewidth=1),
         )
     
-    years = sorted(ndvi_df["year"].unique())
-    year_color_map = {y: YEAR_COLORS[YEAR_MAP[y]] for y in years}
+    crop = crop_labels.get(year, "Unknown")
+    color = YEAR_COLORS[YEAR_MAP[year]]
     
     # ── Panel 1: NDVI ──
     ax = ax_ndvi
-    for year in years:
-        ydf = ndvi_df[ndvi_df["year"] == year].copy()
-        ydf["doy"] = ydf["date"].dt.dayofyear
-        color = year_color_map[year]
-        crop = crop_labels.get(year, "Unknown")
-        ax.scatter(ydf["doy"], ydf["mean_ndvi"], c=[color], s=45, alpha=0.85,
-                   edgecolors="white", linewidth=0.5,
-                   label=f"{year} ({crop})", zorder=3)
-        ax.plot(ydf["doy"], ydf["mean_ndvi"], color=color, linewidth=0.9,
-                alpha=0.5, zorder=2)
+    ydf = ndvi_df[ndvi_df["year"] == year].copy()
+    ydf["doy"] = ydf["date"].dt.dayofyear
+    ax.scatter(ydf["doy"], ydf["mean_ndvi"], c=[color], s=45, alpha=0.85,
+               edgecolors="white", linewidth=0.5,
+               label=f"{year} ({crop})", zorder=3)
+    ax.plot(ydf["doy"], ydf["mean_ndvi"], color=color, linewidth=0.9,
+            alpha=0.5, zorder=2)
     
     if events:
         annotate_panel(ax, events, "ndvi", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax.set_ylabel("Mean NDVI", fontsize=11, fontweight="bold")
-    ax.set_title("1. NDVI Time Series", fontsize=12, fontweight="bold", pad=8, loc="left")
+    ax.set_title(f"1. NDVI Time Series — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.set_ylim(0, 1.0)
     ax.grid(True, alpha=0.15)
@@ -541,38 +539,34 @@ def plot_storyline(
     ax_precip_panel = ax_precip
     ax_cumul = ax_precip.twinx()
     
-    for year in years:
-        ydf = weather_df[(weather_df["date"].dt.year == year) &
-                         (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
-        ydf["doy"] = ydf["date"].dt.dayofyear
-        color = year_color_map[year]
-        ax_precip_panel.bar(ydf["doy"], ydf["PRECTOTCORR"], color=color,
-                            alpha=0.25, width=1.0)
-        cumul = ydf["PRECTOTCORR"].cumsum()
-        ax_cumul.plot(ydf["doy"], cumul, color=color, linewidth=1.2,
-                      linestyle="--", alpha=0.6)
+    ydf = weather_df[(weather_df["date"].dt.year == year) &
+                     (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
+    ydf["doy"] = ydf["date"].dt.dayofyear
+    ax_precip_panel.bar(ydf["doy"], ydf["PRECTOTCORR"], color=color,
+                        alpha=0.25, width=1.0)
+    cumul = ydf["PRECTOTCORR"].cumsum()
+    ax_cumul.plot(ydf["doy"], cumul, color=color, linewidth=1.2,
+                  linestyle="--", alpha=0.6)
     
     if events:
         annotate_panel(ax_precip_panel, events, "precip", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax_precip_panel.set_ylabel("Daily precip (mm)", fontsize=11, fontweight="bold")
     ax_cumul.set_ylabel("Cumulative (mm)", fontsize=10, color="#555")
-    ax_precip_panel.set_title("2. Daily Precipitation", fontsize=12,
+    ax_precip_panel.set_title(f"2. Daily Precipitation — {year} ({crop})", fontsize=12,
                                fontweight="bold", pad=8, loc="left")
     ax_precip_panel.grid(True, alpha=0.15)
     format_doy_axis(ax_precip_panel, doy_range)
     
     # ── Panel 3: Temperature / Extremes ──
     ax = ax_temp
-    for year in years:
-        ydf = weather_df[(weather_df["date"].dt.year == year) &
-                         (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
-        ydf["doy"] = ydf["date"].dt.dayofyear
-        color = year_color_map[year]
-        ax.fill_between(ydf["doy"], ydf["T2M_MIN"], ydf["T2M_MAX"],
-                        color=color, alpha=0.1)
-        ax.plot(ydf["doy"], ydf["T2M"], color=color, linewidth=0.8, alpha=0.6,
-                label=str(year))
+    ydf = weather_df[(weather_df["date"].dt.year == year) &
+                     (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
+    ydf["doy"] = ydf["date"].dt.dayofyear
+    ax.fill_between(ydf["doy"], ydf["T2M_MIN"], ydf["T2M_MAX"],
+                    color=color, alpha=0.1)
+    ax.plot(ydf["doy"], ydf["T2M"], color=color, linewidth=0.8, alpha=0.6,
+            label=str(year))
     
     ax.axhline(30, color="red", linestyle="--", linewidth=1, alpha=0.4,
                label="30°C heat stress")
@@ -581,7 +575,7 @@ def plot_storyline(
         annotate_panel(ax, events, "temp", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax.set_ylabel("Temperature (°C)", fontsize=11, fontweight="bold")
-    ax.set_title("3. Daily Temperature & Extremes", fontsize=12, fontweight="bold", pad=8, loc="left")
+    ax.set_title(f"3. Daily Temperature & Extremes — {year}", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="upper right")
     ax.grid(True, alpha=0.15)
     for spine in ["top", "right"]:
@@ -590,18 +584,15 @@ def plot_storyline(
     
     # ── Panel 4: Cumulative GDD ──
     ax = ax_gdd
-    for year in years:
-        ydf = weather_df[(weather_df["date"].dt.year == year) &
-                         (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
-        ydf["doy"] = ydf["date"].dt.dayofyear
-        color = year_color_map[year]
-        crop = crop_labels.get(year, "Unknown")
-        ax.plot(ydf["doy"], ydf["gdd_cumul"], color=color, linewidth=1.8,
-                alpha=0.85, label=f"{year} ({crop})")
+    ydf = weather_df[(weather_df["date"].dt.year == year) &
+                     (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
+    ydf["doy"] = ydf["date"].dt.dayofyear
+    ax.plot(ydf["doy"], ydf["gdd_cumul"], color=color, linewidth=1.8,
+            alpha=0.85, label=f"{year} ({crop})")
     
     ax.set_xlabel("Day of Year", fontsize=11, fontweight="bold")
     ax.set_ylabel("Cumulative GDD (°C-days, base 10°C)", fontsize=11, fontweight="bold")
-    ax.set_title("4. Cumulative Growing Degree Days", fontsize=12, fontweight="bold", pad=8, loc="left")
+    ax.set_title(f"4. Cumulative Growing Degree Days — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.grid(True, alpha=0.15)
     for spine in ["top", "right"]:
@@ -692,12 +683,16 @@ def main():
     for ev in sorted(events, key=lambda e: (e["year"], e["doy"])):
         print(f"    {ev['year']} DOY {ev['doy']:3d} [{ev['severity']:>6}] {ev['label']}")
     
-    # 8. Generate dashboard with annotations
-    print("\n8. Generating enhanced storyline dashboard...")
-    dashboard_path = out_dir / f"{field_id}_storyline.png"
-    plot_storyline(ndvi_df, weather_df, crop_labels, field_id, dashboard_path,
-                   events=events, strategy_wording=strategy_wording,
-                   doy_range=doy_range)
+    # 8. Generate per-year dashboards
+    print("\n8. Generating per-year storyline dashboards...")
+    years = sorted(ndvi_df["year"].unique())
+    for year in years:
+        print(f"\n  Year {year} — {crop_labels.get(year, 'Unknown')}")
+        year_events = [e for e in events if e["year"] == year]
+        dashboard_path = out_dir / f"{field_id}_storyline_{year}.png"
+        plot_storyline(ndvi_df, weather_df, crop_labels, field_id, year, dashboard_path,
+                       events=year_events, strategy_wording=strategy_wording,
+                       doy_range=doy_range)
     
     # Summary
     print("\n" + "=" * 60)
@@ -705,7 +700,7 @@ def main():
     print("=" * 60)
     print(f"  Field: {field_id}")
     print(f"  NDVI scenes: {len(ndvi_df)}")
-    for year in sorted(ndvi_df["year"].unique()):
+    for year in years:
         n = len(ndvi_df[ndvi_df["year"] == year])
         crop = crop_labels.get(year, "Unknown")
         print(f"    {year}: {n:2d} scenes ({crop})")
