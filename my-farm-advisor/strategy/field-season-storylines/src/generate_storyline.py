@@ -489,8 +489,8 @@ def plot_storyline(
     
     ax_caption = fig.add_subplot(gs[0])
     ax_ndvi = fig.add_subplot(gs[1])
-    ax_temp = fig.add_subplot(gs[2])
-    ax_precip = fig.add_subplot(gs[3])
+    ax_precip = fig.add_subplot(gs[2])
+    ax_temp = fig.add_subplot(gs[3])
     ax_gdd = fig.add_subplot(gs[4])
     
     # Hide caption axis
@@ -512,7 +512,7 @@ def plot_storyline(
     years = sorted(ndvi_df["year"].unique())
     year_color_map = {y: YEAR_COLORS[YEAR_MAP[y]] for y in years}
     
-    # ── Panel 1: NDVI Time Series ──
+    # ── Panel 1: NDVI ──
     ax = ax_ndvi
     for year in years:
         ydf = ndvi_df[ndvi_df["year"] == year].copy()
@@ -529,37 +529,15 @@ def plot_storyline(
         annotate_panel(ax, events, "ndvi", YEAR_COLORS, YEAR_MAP, doy_range)
     
     ax.set_ylabel("Mean NDVI", fontsize=11, fontweight="bold")
-    ax.set_title("NDVI Time Series — Sentinel-2 Scenes", fontsize=12, fontweight="bold", pad=8)
+    ax.set_title("1. NDVI Time Series", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.set_ylim(0, 1.0)
     ax.grid(True, alpha=0.15)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
     format_doy_axis(ax, doy_range)
     
-    # ── Panel 2: Daily Temperature ──
-    ax = ax_temp
-    for year in years:
-        ydf = weather_df[(weather_df["date"].dt.year == year) &
-                         (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
-        ydf["doy"] = ydf["date"].dt.dayofyear
-        color = year_color_map[year]
-        ax.fill_between(ydf["doy"], ydf["T2M_MIN"], ydf["T2M_MAX"],
-                        color=color, alpha=0.1)
-        ax.plot(ydf["doy"], ydf["T2M"], color=color, linewidth=0.8, alpha=0.6,
-                label=str(year))
-    
-    ax.axhline(30, color="red", linestyle="--", linewidth=1, alpha=0.4,
-               label="30°C heat stress")
-    
-    if events:
-        annotate_panel(ax, events, "temp", YEAR_COLORS, YEAR_MAP, doy_range)
-    
-    ax.set_ylabel("Temperature (°C)", fontsize=11, fontweight="bold")
-    ax.set_title("Daily Temperature — Growing Season", fontsize=12, fontweight="bold", pad=8)
-    ax.legend(fontsize=8, ncol=3, loc="upper right")
-    ax.grid(True, alpha=0.15)
-    format_doy_axis(ax, doy_range)
-    
-    # ── Panel 3: Daily Precipitation ──
+    # ── Panel 2: Precipitation ──
     ax_precip_panel = ax_precip
     ax_cumul = ax_precip.twinx()
     
@@ -579,10 +557,36 @@ def plot_storyline(
     
     ax_precip_panel.set_ylabel("Daily precip (mm)", fontsize=11, fontweight="bold")
     ax_cumul.set_ylabel("Cumulative (mm)", fontsize=10, color="#555")
-    ax_precip_panel.set_title("Daily Precipitation — Growing Season", fontsize=12,
-                               fontweight="bold", pad=8)
+    ax_precip_panel.set_title("2. Daily Precipitation", fontsize=12,
+                               fontweight="bold", pad=8, loc="left")
     ax_precip_panel.grid(True, alpha=0.15)
     format_doy_axis(ax_precip_panel, doy_range)
+    
+    # ── Panel 3: Temperature / Extremes ──
+    ax = ax_temp
+    for year in years:
+        ydf = weather_df[(weather_df["date"].dt.year == year) &
+                         (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
+        ydf["doy"] = ydf["date"].dt.dayofyear
+        color = year_color_map[year]
+        ax.fill_between(ydf["doy"], ydf["T2M_MIN"], ydf["T2M_MAX"],
+                        color=color, alpha=0.1)
+        ax.plot(ydf["doy"], ydf["T2M"], color=color, linewidth=0.8, alpha=0.6,
+                label=str(year))
+    
+    ax.axhline(30, color="red", linestyle="--", linewidth=1, alpha=0.4,
+               label="30°C heat stress")
+    
+    if events:
+        annotate_panel(ax, events, "temp", YEAR_COLORS, YEAR_MAP, doy_range)
+    
+    ax.set_ylabel("Temperature (°C)", fontsize=11, fontweight="bold")
+    ax.set_title("3. Daily Temperature & Extremes", fontsize=12, fontweight="bold", pad=8, loc="left")
+    ax.legend(fontsize=8, ncol=3, loc="upper right")
+    ax.grid(True, alpha=0.15)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    format_doy_axis(ax, doy_range)
     
     # ── Panel 4: Cumulative GDD ──
     ax = ax_gdd
@@ -597,9 +601,11 @@ def plot_storyline(
     
     ax.set_xlabel("Day of Year", fontsize=11, fontweight="bold")
     ax.set_ylabel("Cumulative GDD (°C-days, base 10°C)", fontsize=11, fontweight="bold")
-    ax.set_title("Cumulative Growing Degree Days", fontsize=12, fontweight="bold", pad=8)
+    ax.set_title("4. Cumulative Growing Degree Days", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.grid(True, alpha=0.15)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
     format_doy_axis(ax, doy_range)
     
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
