@@ -24,7 +24,7 @@ matplotlib.use("Agg")
 
 GDD_BASE = 10.0
 GS_MONTHS = list(range(4, 11))  # Apr–Oct
-YEAR_COLORS = plt.cm.Set2(np.linspace(0, 1, 5))
+YEAR_COLORS = plt.cm.Set1(np.linspace(0, 1, 5))
 YEAR_MAP = {2021: 0, 2022: 1, 2023: 2, 2024: 3, 2025: 4}
 
 # Event detection thresholds
@@ -507,7 +507,7 @@ def plot_storyline(
             fontfamily="monospace",
             linespacing=1.4,
             bbox=dict(boxstyle="round,pad=0.4", facecolor="#f8f9fa",
-                      edgecolor="#dee2e6", linewidth=1),
+                      edgecolor="#adb5bd", linewidth=1),
         )
     
     crop = crop_labels.get(year, "Unknown")
@@ -517,11 +517,11 @@ def plot_storyline(
     ax = ax_ndvi
     ydf = ndvi_df[ndvi_df["year"] == year].copy()
     ydf["doy"] = ydf["date"].dt.dayofyear
-    ax.scatter(ydf["doy"], ydf["mean_ndvi"], c=[color], s=45, alpha=0.85,
-               edgecolors="white", linewidth=0.5,
+    ax.scatter(ydf["doy"], ydf["mean_ndvi"], c=[color], s=45, alpha=0.95,
+               edgecolors="white", linewidth=0.8,
                label=f"{year} ({crop})", zorder=3)
-    ax.plot(ydf["doy"], ydf["mean_ndvi"], color=color, linewidth=0.9,
-            alpha=0.5, zorder=2)
+    ax.plot(ydf["doy"], ydf["mean_ndvi"], color=color, linewidth=1.2,
+            alpha=0.85, zorder=2)
     
     if events:
         annotate_panel(ax, events, "ndvi", YEAR_COLORS, YEAR_MAP, doy_range)
@@ -530,7 +530,7 @@ def plot_storyline(
     ax.set_title(f"1. NDVI Time Series — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
     ax.set_ylim(0, 1.0)
-    ax.grid(True, alpha=0.15)
+    ax.grid(True, alpha=0.30)
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
     format_doy_axis(ax, doy_range)
@@ -543,10 +543,10 @@ def plot_storyline(
                      (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
     ydf["doy"] = ydf["date"].dt.dayofyear
     ax_precip_panel.bar(ydf["doy"], ydf["PRECTOTCORR"], color=color,
-                        alpha=0.25, width=1.0)
+                        alpha=0.45, width=1.0)
     cumul = ydf["PRECTOTCORR"].cumsum()
-    ax_cumul.plot(ydf["doy"], cumul, color=color, linewidth=1.2,
-                  linestyle="--", alpha=0.6)
+    ax_cumul.plot(ydf["doy"], cumul, color=color, linewidth=1.5,
+                  linestyle="--", alpha=0.85)
     
     if events:
         annotate_panel(ax_precip_panel, events, "precip", YEAR_COLORS, YEAR_MAP, doy_range)
@@ -555,7 +555,7 @@ def plot_storyline(
     ax_cumul.set_ylabel("Cumulative (mm)", fontsize=10, color="#555")
     ax_precip_panel.set_title(f"2. Daily Precipitation — {year} ({crop})", fontsize=12,
                                fontweight="bold", pad=8, loc="left")
-    ax_precip_panel.grid(True, alpha=0.15)
+    ax_precip_panel.grid(True, alpha=0.30)
     format_doy_axis(ax_precip_panel, doy_range)
     
     # ── Panel 3: Temperature / Extremes ──
@@ -564,11 +564,11 @@ def plot_storyline(
                      (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
     ydf["doy"] = ydf["date"].dt.dayofyear
     ax.fill_between(ydf["doy"], ydf["T2M_MIN"], ydf["T2M_MAX"],
-                    color=color, alpha=0.1)
-    ax.plot(ydf["doy"], ydf["T2M"], color=color, linewidth=0.8, alpha=0.6,
+                    color=color, alpha=0.20)
+    ax.plot(ydf["doy"], ydf["T2M"], color=color, linewidth=1.0, alpha=0.85,
             label=str(year))
     
-    ax.axhline(30, color="red", linestyle="--", linewidth=1, alpha=0.4,
+    ax.axhline(30, color="red", linestyle="--", linewidth=1, alpha=0.60,
                label="30°C heat stress")
     
     if events:
@@ -577,7 +577,7 @@ def plot_storyline(
     ax.set_ylabel("Temperature (°C)", fontsize=11, fontweight="bold")
     ax.set_title(f"3. Daily Temperature & Extremes — {year}", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="upper right")
-    ax.grid(True, alpha=0.15)
+    ax.grid(True, alpha=0.30)
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
     format_doy_axis(ax, doy_range)
@@ -587,14 +587,14 @@ def plot_storyline(
     ydf = weather_df[(weather_df["date"].dt.year == year) &
                      (weather_df["date"].dt.month.isin(GS_MONTHS))].copy()
     ydf["doy"] = ydf["date"].dt.dayofyear
-    ax.plot(ydf["doy"], ydf["gdd_cumul"], color=color, linewidth=1.8,
-            alpha=0.85, label=f"{year} ({crop})")
+    ax.plot(ydf["doy"], ydf["gdd_cumul"], color=color, linewidth=2.0,
+            alpha=0.95, label=f"{year} ({crop})")
     
     ax.set_xlabel("Shared growing season timeline", fontsize=11, fontweight="bold")
     ax.set_ylabel("Cumulative GDD (°C-days, base 10°C)", fontsize=11, fontweight="bold")
     ax.set_title(f"4. Cumulative Growing Degree Days — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
-    ax.grid(True, alpha=0.15)
+    ax.grid(True, alpha=0.30)
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
     format_doy_axis(ax, doy_range)
