@@ -12,10 +12,12 @@ import geopandas as gpd
 import matplotlib
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
+import json
 import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.mask import mask
+from scipy.stats import gamma, norm
 
 matplotlib.use("Agg")
 
@@ -127,6 +129,69 @@ def compute_gdd(df: pd.DataFrame) -> pd.DataFrame:
     df["gdd"] = ((df["T2M_MIN"] + df["T2M_MAX"]) / 2 - GDD_BASE).clip(lower=0)
     df["gdd_cumul"] = df.groupby(df["date"].dt.year)["gdd"].cumsum()
     return df
+
+
+def compute_spi(df: pd.DataFrame, timescale: int = 3) -> pd.DataFrame:
+    """Compute Standardized Precipitation Index (SPI) for the given timescale.
+    
+    Aggregates daily precipitation to monthly totals, computes rolling sums
+    over the timescale, fits a gamma distribution per calendar month using
+    the full historical record, and transforms to z-scores.
+    
+    Returns DataFrame with columns: year, month, doy, spi
+    """
+    df = df.copy()
+    df["year"] = df["date"].dt.year
+    df["month"] = df["date"].dt.month
+    
+    # Monthly precipitation totals
+    monthly = df.groupby(["year", "month"])["PRECTOTCORR"].sum().reset_index()
+    monthly = monthly.sort_values(["year", "month"]).reset_index(drop=True)
+    
+    # Compute rolling precipitation sum over timescale months
+    monthly["rolling"] = monthly["PRECTOTCORR"].rolling(window=timescale, min_periods=timescale).sum()
+    monthly = monthly.dropna(subset=["rolling"]).reset_index(drop=True)
+    
+    # For each calendar month, fit gamma distribution and compute SPI
+    monthly["spi"] = np.nan
+    
+    for cal_month in monthly["month"].unique():
+        month_data = monthly[monthly["month"] == cal_month]["rolling"]
+        if len(month_data) < 5:
+            continue  # Not enough data to fit
+        
+        values = month_data.values
+        p0 = np.mean(values == 0)  # Probability of zero precipitation
+        non_zero = values[values > 0]
+        
+        if len(non_zero) < 3:
+            continue
+        
+        # Fit gamma distribution to non-zero values
+        try:
+            shape, loc, scale = gamma.fit(non_zero, floc=0)
+        except Exception:
+            continue
+        
+        # Compute CDF for each value
+        for idx in month_data.index:
+            x = monthly.loc[idx, "rolling"]
+            if x == 0:
+                cdf = p0
+            else:
+                cdf = p0 + (1 - p0) * gamma.cdf(x, shape, scale=scale)
+            
+            # Clip CDF to avoid numerical issues at extremes
+            cdf = np.clip(cdf, 0.001, 0.999)
+            spi_val = norm.ppf(cdf)
+            monthly.loc[idx, "spi"] = spi_val
+    
+    # Assign a representative DOY for each (year, month) — middle of month
+    monthly["doy"] = pd.to_datetime(
+        monthly[["year", "month"]].assign(day=15)
+    ).dt.dayofyear
+    
+    return monthly[["year", "month", "doy", "spi"]].dropna(subset=["spi"]).reset_index(drop=True)
 
 
 # ── Data validation ─────────────────────────────────────────────────
@@ -468,6 +533,23 @@ def build_caption_text(events, crop_labels, strategy_wording):
     return "\n".join(lines)
 
 
+def save_events_json(events, year, field_id, crop, doy_range, output_dir: Path) -> Path:
+    """Save machine-readable events summary as JSON next to the dashboard."""
+    year_events = [ev for ev in events if ev["year"] == year]
+    payload = {
+        "field_id": field_id,
+        "year": year,
+        "crop": crop,
+        "doy_range": list(doy_range) if doy_range else None,
+        "num_events": len(year_events),
+        "events": year_events,
+    }
+    json_path = output_dir / f"{field_id}_events_{year}.json"
+    with open(json_path, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    return json_path
+
+
 def plot_storyline(
     ndvi_df: pd.DataFrame,
     weather_df: pd.DataFrame,
@@ -475,6 +557,7 @@ def plot_storyline(
     field_id: str,
     year: int,
     output_path: Path,
+    spi_df: pd.DataFrame | None = None,
     events: list[dict] | None = None,
     strategy_wording: dict[str, str] | None = None,
     doy_range: tuple[int, int] | None = None,
@@ -484,8 +567,8 @@ def plot_storyline(
     if doy_range is None:
         doy_range = compute_growing_season_window(weather_df, ndvi_df)
     
-    fig = plt.figure(figsize=(16, 20))
-    gs = gridspec.GridSpec(5, 1, height_ratios=[0.06, 1, 1, 1, 1],
+    fig = plt.figure(figsize=(16, 22))
+    gs = gridspec.GridSpec(6, 1, height_ratios=[0.06, 1, 1, 1, 1, 1],
                            hspace=0.12, top=0.93, bottom=0.03)
     
     ax_caption = fig.add_subplot(gs[0])
@@ -493,6 +576,7 @@ def plot_storyline(
     ax_precip = fig.add_subplot(gs[2])
     ax_temp = fig.add_subplot(gs[3])
     ax_gdd = fig.add_subplot(gs[4])
+    ax_spi = fig.add_subplot(gs[5])
     
     # Hide caption axis
     ax_caption.axis("off")
@@ -551,7 +635,7 @@ def plot_storyline(
     if events:
         annotate_panel(ax_precip_panel, events, "precip", YEAR_COLORS, YEAR_MAP, doy_range)
     
-    ax_precip_panel.set_ylabel("Daily precip (mm)", fontsize=11, fontweight="bold")
+    ax_precip_panel.set_ylabel("Daily Precip (mm)", fontsize=11, fontweight="bold")
     ax_cumul.set_ylabel("Cumulative (mm)", fontsize=10, color="#555")
     ax_precip_panel.set_title(f"2. Daily Precipitation — {year} ({crop})", fontsize=12,
                                fontweight="bold", pad=8, loc="left")
@@ -569,7 +653,7 @@ def plot_storyline(
             label=str(year))
     
     ax.axhline(30, color="red", linestyle="--", linewidth=1, alpha=0.60,
-               label="30°C heat stress")
+               label="≥30°C heat stress")
     
     if events:
         annotate_panel(ax, events, "temp", YEAR_COLORS, YEAR_MAP, doy_range)
@@ -590,10 +674,44 @@ def plot_storyline(
     ax.plot(ydf["doy"], ydf["gdd_cumul"], color=color, linewidth=2.0,
             alpha=0.95, label=f"{year} ({crop})")
     
-    ax.set_xlabel("Shared growing season timeline", fontsize=11, fontweight="bold")
+    ax.set_xlabel("Growing season (April – October)", fontsize=11, fontweight="bold")
     ax.set_ylabel("Cumulative GDD (°C-days, base 10°C)", fontsize=11, fontweight="bold")
     ax.set_title(f"4. Cumulative Growing Degree Days — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
     ax.legend(fontsize=8, ncol=3, loc="lower right")
+    ax.grid(True, alpha=0.30)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    format_doy_axis(ax, doy_range)
+    
+    # ── Panel 5: SPI-3 ──
+    ax = ax_spi
+    if spi_df is not None and not spi_df.empty:
+        year_spi = spi_df[spi_df["year"] == year].copy()
+        # Only show growing-season months
+        year_spi = year_spi[year_spi["month"].isin(GS_MONTHS)]
+        
+        if not year_spi.empty:
+            # Color bars based on wet/dry
+            bar_colors = ["#377eb8" if v >= 0 else "#e41a1c" for v in year_spi["spi"]]
+            ax.bar(year_spi["doy"], year_spi["spi"], color=bar_colors,
+                   alpha=0.85, width=12)
+            
+            # Reference lines
+            for level in [-2.0, -1.5, -1.0, 0.0, 1.0, 1.5, 2.0]:
+                linestyle = "-" if level == 0 else "--"
+                ax.axhline(level, color="#555", linestyle=linestyle, linewidth=0.8, alpha=0.4)
+            
+            # Month labels on bars
+            for _, row in year_spi.iterrows():
+                month_abbr = pd.to_datetime(f"2000-{int(row['month']):02d}-15").strftime("%b")
+                ax.text(row["doy"], row["spi"], month_abbr,
+                        ha="center", va="bottom" if row["spi"] >= 0 else "top",
+                        fontsize=7, color="#333")
+    
+    ax.set_xlabel("Growing season (April – October)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("SPI-3", fontsize=11, fontweight="bold")
+    ax.set_title(f"5. Standardized Precipitation Index (SPI-3) — {year} ({crop})", fontsize=12, fontweight="bold", pad=8, loc="left")
+    ax.set_ylim(-3.5, 3.5)
     ax.grid(True, alpha=0.30)
     for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
@@ -683,28 +801,41 @@ def main():
     for ev in sorted(events, key=lambda e: (e["year"], e["doy"])):
         print(f"    {ev['year']} DOY {ev['doy']:3d} [{ev['severity']:>6}] {ev['label']}")
     
-    # 8. Generate per-year dashboards
-    print("\n8. Generating per-year storyline dashboards...")
+    # 8. Compute SPI-3 from full weather record
+    print("\n8. Computing SPI-3 from full weather record...")
+    spi_df = compute_spi(weather_df, timescale=3)
+    print(f"   Computed SPI-3 for {len(spi_df)} month-observations")
+    
+    # 9. Generate per-year dashboards
+    print("\n9. Generating per-year storyline dashboards...")
     years = sorted(ndvi_df["year"].unique())
     for year in years:
         print(f"\n  Year {year} — {crop_labels.get(year, 'Unknown')}")
         year_events = [e for e in events if e["year"] == year]
         dashboard_path = out_dir / f"{field_id}_storyline_{year}.png"
         plot_storyline(ndvi_df, weather_df, crop_labels, field_id, year, dashboard_path,
-                       events=year_events, strategy_wording=strategy_wording,
+                       spi_df=spi_df, events=year_events, strategy_wording=strategy_wording,
                        doy_range=doy_range)
+        
+        # Save machine-readable events JSON
+        json_path = save_events_json(year_events, year, field_id,
+                                     crop_labels.get(year, "Unknown"),
+                                     doy_range, out_dir)
+        print(f"  Events JSON saved: {json_path}")
     
     # Summary
     print("\n" + "=" * 60)
     print("Summary")
     print("=" * 60)
     print(f"  Field: {field_id}")
+    print(f"  Weather records: {len(weather_df)} days ({weather_df['date'].dt.year.min()}–{weather_df['date'].dt.year.max()})")
     print(f"  NDVI scenes: {len(ndvi_df)}")
     for year in years:
         n = len(ndvi_df[ndvi_df["year"] == year])
         crop = crop_labels.get(year, "Unknown")
         print(f"    {year}: {n:2d} scenes ({crop})")
     print(f"  Events detected: {len(events)}")
+    print(f"  SPI-3 observations: {len(spi_df)}")
     print(f"  Output: {out_dir}")
     print("\nDone.")
 
