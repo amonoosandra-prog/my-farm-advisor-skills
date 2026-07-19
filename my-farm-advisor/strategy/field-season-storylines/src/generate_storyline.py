@@ -691,22 +691,21 @@ def plot_storyline(
         year_spi = year_spi[year_spi["month"].isin(GS_MONTHS)]
         
         if not year_spi.empty:
-            # Color bars based on wet/dry
-            bar_colors = ["#377eb8" if v >= 0 else "#e41a1c" for v in year_spi["spi"]]
-            ax.bar(year_spi["doy"], year_spi["spi"], color=bar_colors,
-                   alpha=0.85, width=12)
+            # Fill wet/dry areas (temperature-panel style)
+            year_spi = year_spi.sort_values("doy")
+            ax.fill_between(year_spi["doy"], 0, year_spi["spi"],
+                            where=year_spi["spi"] >= 0,
+                            color="#377eb8", alpha=0.25, interpolate=True)
+            ax.fill_between(year_spi["doy"], 0, year_spi["spi"],
+                            where=year_spi["spi"] < 0,
+                            color="#e41a1c", alpha=0.25, interpolate=True)
+            ax.plot(year_spi["doy"], year_spi["spi"], color="#333",
+                    linewidth=1.5, alpha=0.85)
             
             # Reference lines
             for level in [-2.0, -1.5, -1.0, 0.0, 1.0, 1.5, 2.0]:
                 linestyle = "-" if level == 0 else "--"
                 ax.axhline(level, color="#555", linestyle=linestyle, linewidth=0.8, alpha=0.4)
-            
-            # Month labels on bars
-            for _, row in year_spi.iterrows():
-                month_abbr = pd.to_datetime(f"2000-{int(row['month']):02d}-15").strftime("%b")
-                ax.text(row["doy"], row["spi"], month_abbr,
-                        ha="center", va="bottom" if row["spi"] >= 0 else "top",
-                        fontsize=7, color="#333")
     
     ax.set_xlabel("Growing season (April – October)", fontsize=11, fontweight="bold")
     ax.set_ylabel("SPI-3", fontsize=11, fontweight="bold")

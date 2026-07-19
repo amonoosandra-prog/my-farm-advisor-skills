@@ -1,6 +1,6 @@
 # Field-Season Storylines
 
-Generate per-year, multi-panel dashboards that combine Sentinel-2 NDVI time-series, daily weather, cumulative GDD, and CDL crop labels to show how weather events drove crop growth across each season.
+Generate per-year, 5-panel dashboards that combine Sentinel-2 NDVI time-series, daily weather, cumulative GDD, Standardized Precipitation Index (SPI-3), and CDL crop labels to show how weather events drove crop growth across each season.
 
 ## Assignment 3 — Field-Season Storyline Dashboards
 
@@ -20,6 +20,17 @@ Generate per-year, multi-panel dashboards that combine Sentinel-2 NDVI time-seri
 - **Daily precipitation** (mm) and cumulative seasonal total
 - **Daily mean, min, max temperature** (°C)
 - **Cumulative Growing Degree Days** (GDD, base 10 °C)
+- **SPI-3**: Standardized Precipitation Index at 3-month accumulation, fitted to a gamma distribution over the full climatological record (2000–2025)
+
+### Dashboard panels
+
+| # | Panel | Description |
+|---|-------|-------------|
+| 1 | **NDVI Time Series** | Sentinel-2 field-mean NDVI across the growing season |
+| 2 | **Daily Precipitation** | Daily bars + cumulative line |
+| 3 | **Daily Temperature & Extremes** | Min–max range fill, mean line, heat-stress reference at 30°C |
+| 4 | **Cumulative GDD** | Growing degree day accumulation (base 10°C) |
+| 5 | **SPI-3** | Standardized Precipitation Index with wet/dry fill and severity reference lines |
 
 ### Dashboard outputs
 
