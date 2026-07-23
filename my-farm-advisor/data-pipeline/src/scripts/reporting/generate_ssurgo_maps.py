@@ -39,6 +39,7 @@ sys.path.insert(0, str(_LIB))
 from paths import (
     farm_boundary_path,
     farm_ssurgo_full_path,
+    farm_ssurgo_interpolated_path,
     field_feature_path,
     field_soil_polygon_path,
 )
@@ -299,32 +300,35 @@ def get_ssurgo_polygons_with_soil_data(
     except Exception as e:
         print(f"    Warning: clipping failed, using uncut polygons: {e}")
 
-    soil_csv = farm_ssurgo_full_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+    soil_csv = farm_ssurgo_interpolated_path(_DEFAULT_GROWER, _DEFAULT_FARM)
     if soil_csv.exists():
         soil_df = pd.read_csv(soil_csv)
-        soil_agg = (
-            soil_df.groupby("mukey")
-            .agg(
-                {
-                    "compname": "first",
-                    "comppct_r": "first",
-                    "drainagecl": "first",
-                    "om_r": "mean",
-                    "ph1to1h2o_r": "mean",
-                    "awc_r": "mean",
-                    "claytotal_r": "mean",
-                    "sandtotal_r": "mean",
-                    "silttotal_r": "mean",
-                    "dbthirdbar_r": "mean",
-                    "cec7_r": "mean",
-                }
+        # Use interpolated 0-30cm topsoil layer
+        soil_top = soil_df[soil_df["depth_interval"] == "0-30cm"].copy()
+        if not soil_top.empty:
+            soil_agg = (
+                soil_top.groupby("mukey")
+                .agg(
+                    {
+                        "compname": "first",
+                        "comppct_r": "first",
+                        "drainagecl": "first",
+                        "om_r": "mean",
+                        "ph1to1h2o_r": "mean",
+                        "awc_r": "mean",
+                        "claytotal_r": "mean",
+                        "sandtotal_r": "mean",
+                        "silttotal_r": "mean",
+                        "dbthirdbar_r": "mean",
+                        "cec7_r": "mean",
+                    }
+                )
+                .reset_index()
             )
-            .reset_index()
-        )
-        soil_agg["mukey"] = soil_agg["mukey"].astype(str)
+            soil_agg["mukey"] = soil_agg["mukey"].astype(str)
 
-        polygons["mukey"] = polygons["mukey"].astype(str)
-        polygons = polygons.merge(soil_agg, on="mukey", how="left")
+            polygons["mukey"] = polygons["mukey"].astype(str)
+            polygons = polygons.merge(soil_agg, on="mukey", how="left")
 
     if "mukey" in polygons.columns:
         missing_attrs = (

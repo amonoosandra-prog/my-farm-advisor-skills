@@ -47,6 +47,7 @@ from paths import (
     farm_boundary_path,
     farm_cdl_preferred_full_composition_path,
     farm_ssurgo_full_path,
+    farm_ssurgo_interpolated_path,
     farm_ssurgo_summary_path,
     farm_weather_path,
     field_dir,
@@ -558,7 +559,11 @@ def main() -> None:
     )
 
     fields = gpd.read_file(_REPO / config.field_boundary_path)
-    soil_full = pd.read_csv(farm_ssurgo_full_path(_DEFAULT_GROWER, _DEFAULT_FARM))
+    # Read depth-interpolated SSURGO data
+    soil_interpolated = pd.read_csv(
+        farm_ssurgo_interpolated_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+    )
+    soil_full = soil_interpolated[soil_interpolated["depth_interval"] == "0-30cm"].copy()
     soil_summary = pd.read_csv(farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM))
     weather = pd.read_csv(
         farm_weather_path(_DEFAULT_GROWER, _DEFAULT_FARM), parse_dates=["date"]

@@ -35,6 +35,7 @@ ensure_skill_path("farm-intelligence-reporting")
 
 from paths import (
     farm_boundary_path,
+    farm_ssurgo_interpolated_path,
     farm_ssurgo_summary_path,
     farm_summary_path,
     field_summary_path,
@@ -417,14 +418,20 @@ def main() -> None:
     fields = gpd.read_file(fields_path)
     field_slug_map = field_slug_map_from_inventory()
 
-    # Load SSURGO data
-    ssurgo_path = farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+    # Load depth-interpolated SSURGO data (0-30cm topsoil layer)
+    ssurgo_path = farm_ssurgo_interpolated_path(_DEFAULT_GROWER, _DEFAULT_FARM)
     if not ssurgo_path.exists():
-        print(f"WARNING: SSURGO data not found: {ssurgo_path}")
-        print("Skipping soil card generation.")
-        sys.exit(0)
-
-    ssurgo_df = pd.read_csv(ssurgo_path)
+        print(f"WARNING: Interpolated SSURGO data not found: {ssurgo_path}")
+        print("Falling back to summary file...")
+        ssurgo_path = farm_ssurgo_summary_path(_DEFAULT_GROWER, _DEFAULT_FARM)
+        if not ssurgo_path.exists():
+            print(f"WARNING: SSURGO data not found: {ssurgo_path}")
+            print("Skipping soil card generation.")
+            sys.exit(0)
+        ssurgo_df = pd.read_csv(ssurgo_path)
+    else:
+        ssurgo_df = pd.read_csv(ssurgo_path)
+        ssurgo_df = ssurgo_df[ssurgo_df["depth_interval"] == "0-30cm"].copy()
 
     all_fields_data = {}
 

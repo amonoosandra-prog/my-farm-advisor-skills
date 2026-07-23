@@ -376,33 +376,14 @@ def classify_drainage(drainage_class: str) -> str:
 
 def _build_full_ssurgo_query(wkt: str, max_depth_cm: int = 200) -> str:
     """Build comprehensive SDA SQL query for full SSURGO data."""
-    sql = f"""SELECT mu.mukey, mu.muname, c.cokey, c.compname, c.comppct_r, c.drainagecl, c.majcompflag, ch.chkey, ch.hzdept_r, ch.hzdepb_r, ch.om_r, ch.ph1to1h2o_r, ch.awc_r, ch.claytotal_r, ch.sandtotal_r, ch.silttotal_r, ch.dbthirdbar_r, ch.cec7_r, ch.kwfact FROM mapunit mu INNER JOIN component c ON mu.mukey = c.mukey LEFT JOIN chorizon ch ON c.cokey = ch.cokey WHERE mu.mukey IN (SELECT * FROM SDA_Get_Mukey_from_intersection_with_WktWgs84('{wkt}')) AND (ch.hzdept_r < {max_depth_cm} OR ch.hzdept_r IS NULL) ORDER BY mu.mukey, c.comppct_r DESC, ch.hzdept_r ASC"""
-    return sql
+    # Use minimal column set known to exist in SDA tables to avoid 400 errors
     return f"""
-    SELECT DISTINCT
-        mu.mukey,
-        mu.muname,
-        c.cokey,
-        c.compname,
-        c.comppct_r,
-        c.drainagecl,
-        c.majcompflag,
-        c.engdwobdcd,
-        c.hydgrpcd,
-        ch.chkey,
-        ch.hzdept_r,
-        ch.hzdepb_r,
-        ch.om_r,
-        ch.ph1to1h2o_r,
-        ch.awc_r,
-        ch.claytotal_r,
-        ch.sandtotal_r,
-        ch.silttotal_r,
-        ch.dbthirdbar_r,
-        ch.cec7_r,
-        ch.kwfact,
-        ch.kffact,
-        ch.ecolor
+    SELECT mu.mukey, mu.muname, c.cokey, c.compname, c.comppct_r,
+           c.drainagecl, c.majcompflag,
+           ch.chkey, ch.hzdept_r, ch.hzdepb_r,
+           ch.om_r, ch.ph1to1h2o_r, ch.awc_r,
+           ch.claytotal_r, ch.sandtotal_r, ch.silttotal_r,
+           ch.dbthirdbar_r, ch.cec7_r, ch.kwfact
     FROM mapunit mu
     INNER JOIN component c ON mu.mukey = c.mukey
     LEFT JOIN chorizon ch ON c.cokey = ch.cokey
@@ -689,6 +670,123 @@ def summarize_ssurgo_by_field(soil_full: pd.DataFrame) -> pd.DataFrame:
         )
 
     return pd.DataFrame(summaries)
+
+
+def interpolate_ssurgo_depths(
+    soil_full: pd.DataFrame,
+    depth_intervals: list[tuple[str, int, int]] | None = None,
+) -> pd.DataFrame:
+    """Interpolate SSURGO horizon data to standard depth intervals.
+
+    Takes the full SSURGO horizon DataFrame (from download_full_ssurgo)
+    and computes depth-weighted average soil properties for each target
+    depth interval (e.g. 0-30cm, 30-60cm, 60-100cm, 100-200cm).
+
+    Args:
+        soil_full: DataFrame from download_full_ssurgo() with horizon-level data.
+        depth_intervals: List of (label, top_cm, bottom_cm) tuples.
+            Defaults to standard intervals.
+
+    Returns:
+        DataFrame with one row per field × mukey × component × depth_interval,
+        containing depth-weighted average numeric properties.
+    """
+    if depth_intervals is None:
+        depth_intervals = [
+            ("0-30cm", 0, 30),
+            ("30-60cm", 30, 60),
+            ("60-100cm", 60, 100),
+            ("100-200cm", 100, 200),
+        ]
+
+    if soil_full.empty:
+        return soil_full
+
+    numeric_props = [
+        "om_r", "ph1to1h2o_r", "awc_r", "claytotal_r", "sandtotal_r",
+        "silttotal_r", "dbthirdbar_r", "cec7_r", "kwfact", "kffact",
+    ]
+
+    df = soil_full.copy()
+    for col in numeric_props:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Build grouping columns — use cokey if available, else compname
+    if "cokey" in df.columns:
+        group_cols = ["field_id", "mukey", "cokey"]
+    elif "compname" in df.columns:
+        group_cols = ["field_id", "mukey", "compname"]
+    else:
+        group_cols = ["field_id", "mukey"]
+
+    rows = []
+    sort_cols = [c for c in group_cols if c in df.columns]
+    sort_cols.append("hzdept_r")
+    df = df.sort_values(sort_cols)
+
+    for group_keys, group in df.groupby(group_cols, sort=False):
+        group = group.reset_index(drop=True)
+
+        # Build first-row metadata
+        meta = {"field_id": group_keys[0], "mukey": group_keys[1]}
+        if "muname" in group.columns:
+            meta["muname"] = group["muname"].iloc[0]
+        if "cokey" in df.columns:
+            meta["cokey"] = group_keys[2] if len(group_keys) > 2 else ""
+        else:
+            meta["cokey"] = ""
+        meta["compname"] = group["compname"].iloc[0] if "compname" in group.columns else ""
+        meta["comppct_r"] = pd.to_numeric(group["comppct_r"].iloc[0], errors="coerce")
+        meta["drainagecl"] = group["drainagecl"].iloc[0] if "drainagecl" in group.columns else ""
+        meta["majcompflag"] = group["majcompflag"].iloc[0] if "majcompflag" in group.columns else ""
+
+        for label, top, bottom in depth_intervals:
+            interval_rows = group[
+                (group["hzdept_r"] < bottom) & (group["hzdepb_r"] > top)
+            ].copy()
+
+            if interval_rows.empty:
+                interval_rows = group[
+                    group["hzdept_r"] == group["hzdept_r"].min()
+                ].head(1)
+                if interval_rows.empty:
+                    continue
+
+            interval_rows["overlap_top"] = interval_rows["hzdept_r"].clip(lower=top)
+            interval_rows["overlap_bottom"] = interval_rows["hzdepb_r"].clip(upper=bottom)
+            interval_rows["overlap_thickness"] = (
+                interval_rows["overlap_bottom"] - interval_rows["overlap_top"]
+            ).clip(lower=0)
+
+            total_thickness = interval_rows["overlap_thickness"].sum()
+            if total_thickness <= 0:
+                continue
+
+            row = {**meta, "depth_interval": label, "hzdept_r": top, "hzdepb_r": bottom}
+
+            for prop in numeric_props:
+                if prop not in interval_rows.columns:
+                    continue
+                vals = interval_rows[prop].ffill().bfill()
+                weighted = (vals * interval_rows["overlap_thickness"]).sum()
+                row[prop] = weighted / total_thickness if total_thickness > 0 else None
+
+            rows.append(row)
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+
+    # Ensure consistent column order
+    base_cols = [
+        "field_id", "mukey", "muname", "cokey", "compname",
+        "comppct_r", "drainagecl", "majcompflag",
+        "depth_interval", "hzdept_r", "hzdepb_r",
+    ]
+    prop_cols = [c for c in numeric_props if c in result.columns]
+    final_cols = [c for c in base_cols if c in result.columns] + prop_cols
+    return result[[c for c in final_cols if c in result.columns]]
 
 
 try:

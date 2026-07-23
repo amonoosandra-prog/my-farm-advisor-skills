@@ -111,6 +111,10 @@ def farm_ssurgo_summary_basename(farm_slug: str) -> str:
     return f"{_normalized_farm_artifact_prefix(farm_slug)}_ssurgo_summary.csv"
 
 
+def farm_ssurgo_interpolated_basename(farm_slug: str) -> str:
+    return f"{_normalized_farm_artifact_prefix(farm_slug)}_ssurgo_interpolated.csv"
+
+
 def farm_soil_sample_basename(farm_slug: str) -> str:
     return f"{_normalized_farm_artifact_prefix(farm_slug)}_fields_soil.csv"
 
@@ -141,6 +145,12 @@ def farm_ssurgo_full_path(grower_slug: str, farm_slug: str) -> Path:
 
 def farm_ssurgo_summary_path(grower_slug: str, farm_slug: str) -> Path:
     return farm_table_path(grower_slug, farm_slug, farm_ssurgo_summary_basename(farm_slug))
+
+
+def farm_ssurgo_interpolated_path(grower_slug: str, farm_slug: str) -> Path:
+    return farm_table_path(
+        grower_slug, farm_slug, farm_ssurgo_interpolated_basename(farm_slug)
+    )
 
 
 def farm_soil_sample_path(grower_slug: str, farm_slug: str) -> Path:
@@ -177,6 +187,10 @@ def field_soil_full_path(grower_slug: str, farm_slug: str, field_slug: str) -> P
 
 def field_soil_summary_path(grower_slug: str, farm_slug: str, field_slug: str) -> Path:
     return field_soil_dir(grower_slug, farm_slug, field_slug) / "ssurgo_summary.csv"
+
+
+def field_soil_interpolated_path(grower_slug: str, farm_slug: str, field_slug: str) -> Path:
+    return field_soil_dir(grower_slug, farm_slug, field_slug) / "ssurgo_interpolated.csv"
 
 
 def field_weather_dir(grower_slug: str, farm_slug: str, field_slug: str) -> Path:

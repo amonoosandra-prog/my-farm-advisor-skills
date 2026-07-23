@@ -19,8 +19,10 @@ from paths import (  # pyright: ignore[reportMissingImports]
     farm_manifest_dir,
     farm_soil_sample_path,
     farm_ssurgo_full_path,
+    farm_ssurgo_interpolated_path,
     farm_ssurgo_summary_path,
     field_soil_full_path,
+    field_soil_interpolated_path,
     field_soil_polygon_path,
     field_soil_summary_path,
 )
@@ -32,7 +34,12 @@ from reporting_bootstrap import (
 
 ensure_skill_path("ssurgo-soil")
 
-from ssurgo_soil import download_soil  # pyright: ignore[reportMissingImports]
+from ssurgo_soil import (  # pyright: ignore[reportMissingImports]
+    download_full_ssurgo,
+    download_soil,
+    interpolate_ssurgo_depths,
+    summarize_ssurgo_by_field,
+)
 from ssurgo_workflows import query_mupolygons_for_field  # pyright: ignore[reportMissingImports]
 
 SDA_URL = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
@@ -197,6 +204,72 @@ def _write_field_polygon_caches(
         polygons.to_file(cache_path, driver="GeoJSON")
 
 
+def _write_cached_outputs(
+    *,
+    interpolated: pd.DataFrame,
+    grouped: pd.DataFrame,
+    fields: gpd.GeoDataFrame,
+    field_slug_map: dict[str, str],
+    grower_slug: str,
+    farm_slug: str,
+) -> None:
+    """Write per-field outputs from cached interpolated SSURGO data."""
+    if interpolated.empty or not field_slug_map:
+        return
+    topsoil = interpolated[interpolated["depth_interval"] == "0-30cm"].copy()
+    for field_id, field_slug in field_slug_map.items():
+        # Per-field interpolated
+        field_int = interpolated[
+            interpolated["field_id"].astype(str) == str(field_id)
+        ].copy()
+        if not field_int.empty:
+            int_target = field_soil_interpolated_path(grower_slug, farm_slug, field_slug)
+            int_target.parent.mkdir(parents=True, exist_ok=True)
+            field_int.to_csv(int_target, index=False)
+        # Per-field topsoil (backward compat)
+        field_top = topsoil[topsoil["field_id"].astype(str) == str(field_id)].copy()
+        if not field_top.empty:
+            full_target = field_soil_full_path(grower_slug, farm_slug, field_slug)
+            full_target.parent.mkdir(parents=True, exist_ok=True)
+            field_top.to_csv(full_target, index=False)
+        summary_rows = grouped[grouped["field_id"].astype(str) == str(field_id)].copy()
+        if not summary_rows.empty:
+            summary_target = field_soil_summary_path(grower_slug, farm_slug, field_slug)
+            summary_target.parent.mkdir(parents=True, exist_ok=True)
+            summary_rows.to_csv(summary_target, index=False)
+    _write_field_polygon_caches(
+        fields=fields,
+        soil_data=topsoil,
+        field_slug_map=field_slug_map,
+        grower_slug=grower_slug,
+        farm_slug=farm_slug,
+        force=False,
+    )
+
+
+def _build_soil_summary(topsoil: pd.DataFrame) -> pd.DataFrame:
+    """Build soil summary DataFrame from 0-30cm interpolated topsoil data."""
+    if topsoil.empty:
+        return pd.DataFrame()
+    return (
+        topsoil.groupby("field_id", as_index=False)
+        .agg(
+            n_mukeys=("mukey", "nunique"),
+            n_components=("compname", "nunique"),
+            n_horizons=("depth_interval", "count"),
+            avg_om_pct=("om_r", "mean"),
+            avg_ph=("ph1to1h2o_r", "mean"),
+            total_aws_inches=("awc_r", "mean"),
+            avg_cec=("cec7_r", "mean"),
+            avg_clay_pct=("claytotal_r", "mean"),
+            avg_sand_pct=("sandtotal_r", "mean"),
+            dominant_soil=("compname", "first"),
+            drainage_class=("drainagecl", "first"),
+        )
+        .assign(ph_constraint="none", erosion_risk="moderate")
+    )
+
+
 def main():
     print("=" * 60)
     print("Step 2: Download SSURGO Soil Data")
@@ -219,22 +292,23 @@ def main():
 
     farm_full_output = farm_ssurgo_full_path(grower_slug, farm_slug)
     farm_summary_output = farm_ssurgo_summary_path(grower_slug, farm_slug)
+    farm_interpolated_output = farm_ssurgo_interpolated_path(grower_slug, farm_slug)
     farm_sample_output = farm_soil_sample_path(grower_slug, farm_slug)
     farm_sample_output.parent.mkdir(parents=True, exist_ok=True)
     force = os.environ.get("AG_FORCE") == "1"
 
     if (
         farm_full_output.exists()
+        and farm_interpolated_output.exists()
         and farm_summary_output.exists()
-        and farm_sample_output.exists()
         and not force
     ):
-        soil_data = pd.read_csv(farm_sample_output)
+        interpolated = pd.read_csv(farm_interpolated_output)
         grouped = pd.read_csv(farm_summary_output)
         expected_field_ids = set(fields["field_id"].astype(str).tolist())
         cached_field_ids = (
-            set(soil_data["field_id"].astype(str).tolist())
-            if "field_id" in soil_data.columns
+            set(interpolated["field_id"].astype(str).tolist())
+            if "field_id" in interpolated.columns
             else set()
         )
         missing_field_ids = sorted(expected_field_ids - cached_field_ids)
@@ -244,74 +318,64 @@ def main():
                 + ", ".join(missing_field_ids)
             )
         else:
-            if field_slug_map:
-                for field_id, field_slug in field_slug_map.items():
-                    field_rows = soil_data[
-                        soil_data["field_id"].astype(str) == str(field_id)
-                    ].copy()
-                    if not field_rows.empty:
-                        full_target = field_soil_full_path(grower_slug, farm_slug, field_slug)
-                        full_target.parent.mkdir(parents=True, exist_ok=True)
-                        field_rows.to_csv(full_target, index=False)
-                    summary_rows = grouped[grouped["field_id"].astype(str) == str(field_id)].copy()
-                    if not summary_rows.empty:
-                        summary_target = field_soil_summary_path(grower_slug, farm_slug, field_slug)
-                        summary_target.parent.mkdir(parents=True, exist_ok=True)
-                        summary_rows.to_csv(summary_target, index=False)
-                _write_field_polygon_caches(
-                    fields=fields,
-                    soil_data=soil_data,
-                    field_slug_map=field_slug_map,
-                    grower_slug=grower_slug,
-                    farm_slug=farm_slug,
-                    force=False,
-                )
-            print(f"skip  SSURGO API fetch (cached): {farm_sample_output}")
-            return soil_data
+            _write_cached_outputs(
+                interpolated=interpolated,
+                grouped=grouped,
+                fields=fields,
+                field_slug_map=field_slug_map,
+                grower_slug=grower_slug,
+                farm_slug=farm_slug,
+            )
+            print(f"skip  SSURGO API fetch (cached): {farm_interpolated_output}")
+            return interpolated
 
-    soil_data = download_soil(
+    # Download full SSURGO profile (0-200cm)
+    print("  Downloading full SSURGO profile (0-200cm)...")
+    full_soil = download_full_ssurgo(
         fields,
         field_id_column="field_id",
-        max_depth_cm=30,
-        output_path=str(farm_sample_output),
+        max_depth_cm=200,
+        output_path=str(farm_full_output),
     )
 
-    if soil_data.empty:
+    if full_soil.empty:
         print("  Primary SSURGO download returned no rows; querying SDA fallback summaries...")
-        soil_data = _fallback_field_soil(fields)
-        if not soil_data.empty:
-            soil_data.to_csv(farm_full_output, index=False)
-            soil_data.to_csv(farm_sample_output, index=False)
+        full_soil = _fallback_field_soil(fields)
+        if not full_soil.empty:
+            full_soil.to_csv(farm_full_output, index=False)
 
-    if not soil_data.empty:
-        soil_data.to_csv(farm_full_output, index=False)
-        soil_data.to_csv(farm_sample_output, index=False)
-        grouped = (
-            soil_data.groupby("field_id", as_index=False)
-            .agg(
-                n_mukeys=("mukey", "nunique"),
-                n_components=("compname", "nunique"),
-                n_horizons=("mukey", "count"),
-                avg_om_pct=("om_r", "mean"),
-                avg_ph=("ph1to1h2o_r", "mean"),
-                total_aws_inches=("awc_r", "sum"),
-                avg_cec=("cec7_r", "mean"),
-                avg_clay_pct=("claytotal_r", "mean"),
-                avg_sand_pct=("sandtotal_r", "mean"),
-                dominant_soil=("compname", "first"),
-                drainage_class=("drainagecl", "first"),
-            )
-            .assign(ph_constraint="none", erosion_risk="moderate")
-        )
+    if not full_soil.empty:
+        # Interpolate to standard depth intervals
+        print("  Interpolating SSURGO data to standard depth intervals...")
+        interpolated = interpolate_ssurgo_depths(full_soil)
+        interpolated.to_csv(farm_interpolated_output, index=False)
+        print(f"  Saved {len(interpolated)} interpolated rows to {farm_interpolated_output.name}")
+
+        # Save 0-30cm subset as backward-compatible sample
+        topsoil = interpolated[interpolated["depth_interval"] == "0-30cm"].copy()
+        topsoil.to_csv(farm_sample_output, index=False)
+        print(f"  Saved {len(topsoil)} topsoil rows to {farm_sample_output.name}")
+
+        # Generate summary using depth-interpolated 0-30cm data
+        grouped = _build_soil_summary(topsoil)
         grouped.to_csv(farm_summary_output, index=False)
 
         if field_slug_map:
             for field_id, field_slug in field_slug_map.items():
-                field_rows = soil_data[soil_data["field_id"].astype(str) == str(field_id)].copy()
-                if not field_rows.empty:
+                # Per-field interpolated
+                field_int = interpolated[
+                    interpolated["field_id"].astype(str) == str(field_id)
+                ].copy()
+                if not field_int.empty:
+                    int_target = field_soil_interpolated_path(grower_slug, farm_slug, field_slug)
+                    int_target.parent.mkdir(parents=True, exist_ok=True)
+                    field_int.to_csv(int_target, index=False)
+                # Per-field topsoil (backward compat)
+                field_top = topsoil[topsoil["field_id"].astype(str) == str(field_id)].copy()
+                if not field_top.empty:
                     full_target = field_soil_full_path(grower_slug, farm_slug, field_slug)
                     full_target.parent.mkdir(parents=True, exist_ok=True)
-                    field_rows.to_csv(full_target, index=False)
+                    field_top.to_csv(full_target, index=False)
                 summary_rows = grouped[grouped["field_id"].astype(str) == str(field_id)].copy()
                 if not summary_rows.empty:
                     summary_target = field_soil_summary_path(grower_slug, farm_slug, field_slug)
@@ -320,7 +384,7 @@ def main():
 
             _write_field_polygon_caches(
                 fields=fields,
-                soil_data=soil_data,
+                soil_data=full_soil,
                 field_slug_map=field_slug_map,
                 grower_slug=grower_slug,
                 farm_slug=farm_slug,
@@ -328,11 +392,11 @@ def main():
             )
 
     print(
-        f"\n✓ Downloaded {len(soil_data)} soil records for {soil_data['field_id'].nunique()} fields"
+        f"\n✓ Downloaded {len(full_soil)} full SSURGO records for {full_soil['field_id'].nunique()} fields"
     )
-    print(f"  Output: {farm_sample_output}")
+    print(f"  Interpolated output: {farm_interpolated_output}")
 
-    return soil_data
+    return full_soil
 
 
 if __name__ == "__main__":

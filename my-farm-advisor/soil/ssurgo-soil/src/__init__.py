@@ -7,11 +7,15 @@ Usage:
 from .ssurgo_soil import (  # noqa: F401
     SDA_URL,
     classify_drainage,
+    download_full_ssurgo,
     download_soil,
     get_dominant_soil,
     get_soil_at_point,
     get_soil_for_polygon,
+    interpolate_ssurgo_depths,
     query_sda,
+    query_sda_extended,
+    summarize_ssurgo_by_field,
 )
 from .ssurgo_workflows import (  # noqa: F401
     NUMERIC_SOIL_PROPS,
