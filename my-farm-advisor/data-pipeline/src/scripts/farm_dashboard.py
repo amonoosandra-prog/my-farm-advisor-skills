@@ -24,8 +24,10 @@ from rasterstats import zonal_stats
 SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR / "lib"))
+sys.path.insert(0, str(SCRIPTS_DIR / "reporting"))
 
 from naming import field_slug_from_id
+from reporting.dashboard_lib import generate_dashboard as _generate_dashboard
 from paths import (
     DATA_ROOT,
     GROWERS_ROOT,
@@ -533,6 +535,21 @@ def refresh_command(args: argparse.Namespace) -> None:
     )
 
 
+def dashboard_generate_command(args: argparse.Namespace) -> None:
+    from reporting.dashboard_lib import resolve_farm_dir
+
+    farm_dir = resolve_farm_dir(
+        farm_dir=args.farm_dir,
+        growers_dir=args.growers_dir,
+    )
+    _generate_dashboard(
+        farm_dir=farm_dir,
+        output=args.output,
+        no_basemap=args.no_basemap,
+        cache_dir=args.plotly_cache,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Create or refresh farm intelligence dashboards"
@@ -595,6 +612,37 @@ def build_parser() -> argparse.ArgumentParser:
     refresh.add_argument("--farm-slug", default=None)
     refresh.add_argument("--force", action="store_true")
     refresh.set_defaults(handler=refresh_command)
+
+    dashboard = sub.add_parser("dashboard", help="Generate or manage weather dashboards")
+    dashboard_sub = dashboard.add_subparsers(dest="dashboard_command", required=True)
+
+    dg = dashboard_sub.add_parser("generate", help="Generate Grower Field Weather Dashboard")
+    dg.add_argument(
+        "--farm-dir",
+        default=None,
+        help="Path to farm directory with boundary/field_boundaries.geojson and fields/",
+    )
+    dg.add_argument(
+        "--growers-dir",
+        default=None,
+        help="Path to growers root directory containing growers/*/farms/*/",
+    )
+    dg.add_argument(
+        "--output",
+        default=None,
+        help="Explicit output path for the dashboard HTML file",
+    )
+    dg.add_argument(
+        "--no-basemap",
+        action="store_true",
+        help="Skip satellite basemap download; use neutral background",
+    )
+    dg.add_argument(
+        "--plotly-cache",
+        default=None,
+        help="Directory to cache the vendored Plotly bundle",
+    )
+    dg.set_defaults(handler=dashboard_generate_command)
 
     return parser
 

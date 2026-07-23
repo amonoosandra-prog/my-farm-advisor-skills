@@ -1,0 +1,10 @@
+{
+  "grower_slug": "test-grower",
+  "farm_slug": "test-farm",
+  "field_slug": "field_1",
+  "display_name": "North Field",
+  "field_id": "osm-1001",
+  "boundary_file": "boundary/field_boundary.geojson",
+  "weather_file": "weather/daily_weather.csv",
+  "notes": "Test field metadata"
+}

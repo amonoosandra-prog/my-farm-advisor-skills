@@ -1,0 +1,49 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "field_id": "osm-1001",
+        "area_acres": 45.2,
+        "display_name": "North Field"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-93.5, 42.0],
+          [-93.3, 42.0],
+          [-93.3, 42.2],
+          [-93.5, 42.2],
+          [-93.5, 42.0]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "field_id": "osm-1002",
+        "area_acres": 32.8
+      },
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [[
+            [-93.6, 42.3],
+            [-93.5, 42.3],
+            [-93.5, 42.4],
+            [-93.6, 42.4],
+            [-93.6, 42.3]
+          ]],
+          [[
+            [-93.55, 42.25],
+            [-93.5, 42.25],
+            [-93.5, 42.3],
+            [-93.55, 42.3],
+            [-93.55, 42.25]
+          ]]
+        ]
+      }
+    }
+  ]
+}
