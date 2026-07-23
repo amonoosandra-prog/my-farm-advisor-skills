@@ -1,0 +1,9 @@
+{
+  "grower_slug": "test-grower",
+  "farm_slug": "test-farm",
+  "display_name": "Test Farm",
+  "state": "IA",
+  "country": "US",
+  "default_crs": "EPSG:4326",
+  "notes": "Test farm metadata"
+}

@@ -24,6 +24,12 @@ matplotlib>=3.8
 seaborn>=0.13
 contextily>=1.6
 
+# Image processing (dashboard satellite basemap stitching)
+pillow>=10
+
+# Test framework
+pytest>=8
+
 # General utilities
 requests>=2.31
 beautifulsoup4>=4.12
