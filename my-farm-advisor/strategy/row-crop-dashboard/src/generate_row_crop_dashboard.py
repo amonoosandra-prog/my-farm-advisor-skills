@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from itertools import combinations
 
 PLOTLY_VERSION = "2.35.2"
 PLOTLY_URL = f"https://cdn.plot.ly/plotly-{PLOTLY_VERSION}.min.js"
@@ -243,11 +244,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubunt
 .chart-container h2{font-size:1.1rem;font-weight:600;color:#0f172a;margin-bottom:0.75rem;padding-bottom:0.5rem;border-bottom:1px solid #f1f5f9}
 .chart-container .chart-plot{width:100%}
 .chart-container .interpretation{margin-top:0.75rem;padding:0.75rem 1rem;background:#f8fafc;border-radius:8px;border-left:3px solid #1f77b4;font-size:0.85rem;color:#334155;line-height:1.6}
-.controls-bar{display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;margin-bottom:1rem}
-.controls-bar select,.controls-bar button{padding:0.4rem 0.75rem;font-size:0.8rem;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1e293b;cursor:pointer;font-family:inherit}
-.controls-bar select:hover,.controls-bar button:hover{border-color:#94a3b8;background:#f8fafc}
+.controls-bar{display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin-bottom:0.75rem;padding:0.75rem;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0}
+.controls-bar label{font-size:0.78rem;font-weight:600;color:#475569;display:flex;align-items:center;gap:0.3rem}
+.controls-bar select{padding:0.35rem 0.6rem;font-size:0.78rem;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1e293b;cursor:pointer;font-family:inherit;max-width:160px}
+.controls-bar select:hover,.controls-bar button:hover{border-color:#94a3b8}
+.controls-bar button{padding:0.35rem 0.6rem;font-size:0.75rem;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#1e293b;cursor:pointer;font-family:inherit;white-space:nowrap}
+.controls-bar button.active{border-color:#1f77b4;background:#eff6ff;color:#1f77b4;font-weight:600}
+.controls-bar .filter-group{display:flex;align-items:center;gap:0.3rem}
+.controls-bar .sel-count{font-size:0.72rem;color:#94a3b8;min-width:60px}
+.map-layer-btn{padding:0.3rem 0.5rem;font-size:0.72rem;border:1px solid #d1d5db;border-radius:4px;background:#fff;cursor:pointer}
+.map-layer-btn.active{background:#1f77b4;color:#fff;border-color:#1f77b4}
 .footer{text-align:center;padding:1.5rem;font-size:0.75rem;color:#94a3b8}
-@media(max-width:768px){.header{padding:1rem}.content{padding:1rem}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+.tag{display:inline-block;font-size:0.65rem;padding:0.1rem 0.35rem;border-radius:3px;font-weight:600;margin-right:0.25rem}
+.tag-high{background:#dc2626;color:#fff}
+.tag-med{background:#f59e0b;color:#fff}
+.tag-low{background:#16a34a;color:#fff}
+@media(max-width:768px){.header{padding:1rem}.content{padding:1rem}.kpi-grid{grid-template-columns:repeat(2,1fr)}.controls-bar{flex-direction:column;align-items:stretch}}
 """
 
 
@@ -277,6 +289,103 @@ def _build_interpretation_html(patterns: list[str]) -> str:
         f"<ul style='margin-top:0.5rem;padding-left:1.25rem'>{lines}</ul>"
         "</div>"
     )
+
+
+def _generate_recommendations(all_fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    recs = []
+    for f in all_fields:
+        sh = f.get("soil_health")
+        if not sh:
+            continue
+        ndvi = f.get("avg_ndvi")
+        fid = f["field_id"]
+        field_recs = {"field_id": fid, "items": []}
+
+        if sh["ph_score"] < 50:
+            field_recs["items"].append({
+                "priority": "high" if sh["ph_score"] < 30 else "medium",
+                "category": "Soil pH",
+                "action": f"Apply lime to raise pH from {sh['ph']:.1f} to target 6.5",
+                "detail": f"Current pH score: {sh['ph_score']:.0f}/100",
+            })
+        if sh["om_score"] < 40:
+            field_recs["items"].append({
+                "priority": "high",
+                "category": "Organic Matter",
+                "action": "Incorporate cover crops or manure to build organic matter",
+                "detail": f"Current OM: {sh['om_pct']:.1f}% (score: {sh['om_score']:.0f}/100)",
+            })
+        if sh["drainage_score"] < 40:
+            field_recs["items"].append({
+                "priority": "high" if sh["drainage_score"] < 20 else "medium",
+                "category": "Drainage",
+                "action": "Consider tile drainage installation or surface water management",
+                "detail": f"Drainage class: {sh['drainage_class']} (score: {sh['drainage_score']:.0f}/100)",
+            })
+        elif sh["drainage_score"] < 60:
+            field_recs["items"].append({
+                "priority": "low",
+                "category": "Drainage",
+                "action": "Monitor drainage during wet periods; consider surface ditching",
+                "detail": f"Drainage class: {sh['drainage_class']} (score: {sh['drainage_score']:.0f}/100)",
+            })
+        if sh["cec_score"] < 40:
+            field_recs["items"].append({
+                "priority": "medium",
+                "category": "CEC / Nutrient Holding",
+                "action": "Add organic amendments (compost, manure) to improve nutrient holding capacity",
+                "detail": f"Current CEC: {sh['cec']} meq/100g (score: {sh['cec_score']:.0f}/100)",
+            })
+        if ndvi is not None and ndvi < 0.4 and sh["score"] > 60:
+            field_recs["items"].append({
+                "priority": "medium",
+                "category": "Crop Performance",
+                "action": "Low NDVI despite good soil health — investigate pest, disease, or management issues",
+                "detail": f"NDVI: {ndvi:.3f} vs expected based on Soil Score: {sh['score']:.0f}",
+            })
+        if ndvi is not None and ndvi < 0.35 and sh["score"] < 50:
+            field_recs["items"].append({
+                "priority": "high",
+                "category": "Integrated Improvement",
+                "action": "Multi-factor improvement plan: address soil health constraints to boost crop performance",
+                "detail": f"NDVI: {ndvi:.3f}, Soil Score: {sh['score']:.0f}",
+            })
+
+        if field_recs["items"]:
+            field_recs["priority"] = "high" if any(i["priority"] == "high" for i in field_recs["items"]) else "medium"
+            recs.append(field_recs)
+    recs.sort(key=lambda r: 0 if r.get("priority") == "high" else (1 if r.get("priority") == "medium" else 2))
+    return recs
+
+
+def _build_recommendations_html(recommendations: list[dict[str, Any]]) -> str:
+    if not recommendations:
+        return '<div class="interpretation">No recommendations needed — all fields have adequate soil health scores.</div>'
+    sections = ""
+    for rec in recommendations:
+        fid = rec["field_id"]
+        pri = rec.get("priority", "low")
+        pri_color = {"high": "#dc2626", "medium": "#f59e0b", "low": "#16a34a"}
+        items_html = "".join(
+            f'<div style="display:flex;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid #f1f5f9">'
+            f'<span style="font-size:0.7rem;padding:0.15rem 0.4rem;border-radius:4px;'
+            f'background:{pri_color.get(i["priority"],"#94a3b8")};color:#fff;white-space:nowrap;'
+            f'font-weight:600">{i["priority"].upper()}</span>'
+            f'<span style="font-weight:600;color:#1e293b;font-size:0.8rem;min-width:100px">{i["category"]}</span>'
+            f'<span style="color:#334155;font-size:0.8rem;flex:1">{i["action"]}</span>'
+            f'<span style="color:#94a3b8;font-size:0.75rem;min-width:120px;text-align:right">{i["detail"]}</span>'
+            f'</div>'
+            for i in rec["items"]
+        )
+        sections += (
+            f'<div style="margin-bottom:0.75rem;padding:0.75rem;background:#fff;border-radius:8px;'
+            f'border-left:3px solid {pri_color[pri]}">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem">'
+            f'<strong style="font-size:0.9rem">{fid}</strong>'
+            f'<span style="font-size:0.75rem;color:#64748b">{len(rec["items"])} action(s)</span>'
+            f'</div>{items_html}</div>'
+        )
+    return sections
 
 
 def _generate_insights(all_fields: list[dict[str, Any]]) -> list[str]:
@@ -799,19 +908,31 @@ def build_dashboard_html(
     interpretation_html: str,
     plotly_js: str,
     all_fields: list[dict[str, Any]],
+    client_data_json: str = "null",
+    recommendations_html: str = "",
+    recommendations_json: str = "[]",
+    basemap_json: str = "null",
+    sorted_years: list[int] | None = None,
 ) -> str:
-    sections = [
-        ("kpi", "Summary", ""),
-        ("ndvi", "NDVI Comparison", _serialize_fig(ndvi_fig)),
-        ("om", "Soil vs NDVI", _serialize_fig(om_fig)),
-        ("map", "Geospatial Map", _serialize_fig(map_fig)),
-        ("weather", "Weather Analysis", ""),
-        ("soil", "Soil Health Metric", _serialize_fig(soil_fig)),
-        ("insights", "Interpretation", ""),
-    ]
-
     gdd_serialized = _serialize_fig(gdd_fig)
     precip_serialized = _serialize_fig(precip_fig)
+    ndvi_serialized = _serialize_fig(ndvi_fig)
+    om_serialized = _serialize_fig(om_fig)
+    map_serialized = _serialize_fig(map_fig)
+    soil_serialized = _serialize_fig(soil_fig)
+    field_count = len(all_fields)
+    gen_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    years_json = json.dumps(sorted_years or [])
+
+    nav_buttons = ""
+    nav_items = [
+        ("kpi", "Summary"), ("ndvi", "NDVI"), ("om", "Soil vs NDVI"),
+        ("map", "Geospatial Map"), ("weather", "Weather"),
+        ("soil", "Soil Health"), ("recs", "Recommendations"), ("insights", "Insights"),
+    ]
+    for i, (sid, sname) in enumerate(nav_items):
+        cls = ' class="active"' if i == 0 else ""
+        nav_buttons += f'<button{cls} data-section="{sid}">{sname}</button>'
 
     return f"""<!doctype html>
 <html lang="en">
@@ -824,29 +945,28 @@ def build_dashboard_html(
 <body>
 <div class="header">
   <h1>Row Crop Intelligence Data Dashboard</h1>
-  <div class="subtitle">{farm_name} &middot; {len(all_fields)} fields &middot; Generated {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}</div>
+  <div class="subtitle">{farm_name} &middot; {field_count} fields &middot; Generated {gen_time}</div>
 </div>
-<div class="nav" id="nav">
-  <button class="active" data-section="kpi">Summary</button>
-  <button data-section="ndvi">NDVI Comparison</button>
-  <button data-section="om">Soil vs NDVI</button>
-  <button data-section="map">Geospatial Map</button>
-  <button data-section="weather">Weather Analysis</button>
-  <button data-section="soil">Soil Health Metric</button>
-  <button data-section="insights">Interpretation</button>
-</div>
+<div class="nav" id="nav">{nav_buttons}</div>
 
 <div class="content">
   <div class="section active" id="section-kpi">
     {kpi_html}
   </div>
+
   <div class="section" id="section-ndvi">
     <div class="chart-container">
       <h2>Exploratory Visualization 1: NDVI Comparison Across Fields</h2>
-      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Comparing mean NDVI values for corn and soybean across all fields. Fields are sorted by average NDVI (descending).</p>
+      <div class="controls-bar">
+        <div class="filter-group"><label>Fields: <select id="ndvi-field-filter" multiple style="height:80px;min-width:140px"></select></label></div>
+        <button id="ndvi-compare-btn" title="Select 2 fields to compare side-by-side">Compare 2 Fields</button>
+        <span class="sel-count" id="ndvi-sel-count"></span>
+      </div>
+      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Comparing mean NDVI values for corn and soybean. Select fields above to filter. Click "Compare 2 Fields", then click two fields on the chart to overlay.</p>
       <div class="chart-plot" id="ndvi-chart"></div>
     </div>
   </div>
+
   <div class="section" id="section-om">
     <div class="chart-container">
       <h2>Exploratory Visualization 2: Soil Organic Matter vs NDVI</h2>
@@ -854,46 +974,75 @@ def build_dashboard_html(
       <div class="chart-plot" id="om-chart"></div>
     </div>
   </div>
+
   <div class="section" id="section-map">
     <div class="chart-container">
-      <h2>Geospatial Analysis: Field Boundaries Colored by Soil Health Score</h2>
-      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Interactive map with satellite basemap. Fields are colored on a green-yellow-red gradient based on their composite Soil Health Score. Hover over fields for details.</p>
+      <h2>Geospatial Analysis: Field Boundaries</h2>
+      <div class="controls-bar">
+        <div class="filter-group"><label>Color by: </label>
+          <button class="map-layer-btn active" data-metric="soilHealth">Soil Health</button>
+          <button class="map-layer-btn" data-metric="ndvi">NDVI</button>
+          <button class="map-layer-btn" data-metric="om">OM %</button>
+          <button class="map-layer-btn" data-metric="ph">pH</button>
+          <button class="map-layer-btn" data-metric="drainage">Drainage</button>
+        </div>
+      </div>
+      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Interactive map with satellite basemap. Click layer buttons to toggle between metrics. Hover over fields for details.</p>
       <div class="chart-plot" id="map-chart" style="height:600px"></div>
     </div>
   </div>
+
   <div class="section" id="section-weather">
+    <div class="controls-bar">
+      <div class="filter-group"><label>Fields: <select id="weather-field-filter" multiple style="height:80px;min-width:140px"></select></label></div>
+      <div class="filter-group"><label>Year: <select id="weather-year-select"></select></label></div>
+      <span class="sel-count" id="weather-sel-count"></span>
+    </div>
     <div class="chart-container">
       <h2>Weather & Climate Analysis: Cumulative GDD</h2>
-      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Growing Degree Day accumulation curves for each field across all available years (base 10°C). Compare thermal time accumulation patterns across fields.</p>
-      <div class="chart-plot" id="gdd-chart" style="height:400px"></div>
+      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Growing Degree Day accumulation curves for selected fields and year. Use filters above to change selection.</p>
+      <div class="chart-plot" id="gdd-chart" style="height:350px"></div>
     </div>
     <div class="chart-container">
       <h2>Weather & Climate Analysis: Daily Precipitation</h2>
-      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Daily precipitation distribution across fields for the selected year. Bars show daily rainfall amounts.</p>
-      <div class="chart-plot" id="precip-chart" style="height:400px"></div>
+      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Daily precipitation distribution for selected fields and year.</p>
+      <div class="chart-plot" id="precip-chart" style="height:350px"></div>
     </div>
   </div>
+
   <div class="section" id="section-soil">
     <div class="chart-container">
       <h2>Soil Health & Sustainability Metric</h2>
       <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">
-        <strong>Soil Health Score</strong> is a weighted composite metric (0–100) calculated from four soil properties:
-        <strong>Organic Matter</strong> (35% weight), <strong>pH suitability</strong> (25%), <strong>Drainage class</strong> (20%), and <strong>CEC</strong> (20%).
+        <strong>Soil Health Score</strong> is a weighted composite metric (0–100): <strong>OM</strong> (35%), <strong>pH</strong> (25%), <strong>Drainage</strong> (20%), <strong>CEC</strong> (20%).
         Higher scores indicate better overall soil quality for row crop production.
       </p>
       <div class="chart-plot" id="soil-chart"></div>
     </div>
   </div>
+
+  <div class="section" id="section-recs">
+    <div class="chart-container">
+      <h2>Decision-Support Recommendations</h2>
+      <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Per-field agronomic recommendations based on soil health component analysis and crop performance. Prioritize <span class="tag tag-high">HIGH</span> items first.</p>
+      <div id="recommendations-list">{recommendations_html}</div>
+      <div style="margin-top:1rem;padding:0.75rem 1rem;background:#f0fdf4;border-radius:8px;border-left:3px solid #16a34a;font-size:0.85rem;color:#166534;line-height:1.6">
+        <strong>How to Use Recommendations:</strong><br>
+        Each field has prioritized actions. Start with <span class="tag tag-high">HIGH</span> priority items.
+        Implement lime applications in fall, cover crops after harvest, and drainage improvements in dry seasons.
+        Re-run the dashboard after a season to track improvement.
+      </div>
+    </div>
+  </div>
+
   <div class="section" id="section-insights">
     <div class="chart-container">
       <h2>Interpretation & Key Insights</h2>
       {interpretation_html}
       <div style="margin-top:1rem;padding:0.75rem 1rem;background:#f0fdf4;border-radius:8px;border-left:3px solid #16a34a;font-size:0.85rem;color:#166534;line-height:1.6">
         <strong>How to Use This Dashboard:</strong><br>
-        Compare fields side-by-side in each section. Fields with low Soil Health Scores may benefit from
-        targeted amendments (lime for pH, organic matter building). Fields with low NDVI despite good soil
-        conditions may have management or pest issues. The weather section helps contextualize
-        year-to-year variability in crop performance.
+        Compare fields side-by-side in each section. Use filters and map layer controls to explore patterns.
+        The Recommendations tab provides prioritized actions per field. Regenerate the dashboard after each season to track changes.
       </div>
     </div>
   </div>
@@ -902,25 +1051,388 @@ def build_dashboard_html(
 <div class="footer">Row Crop Intelligence Data Dashboard &middot; Generated by My Farm Advisor</div>
 
 <script>
-var NDVI_FIG = {_serialize_fig(ndvi_fig)};
-var OM_FIG = {_serialize_fig(om_fig)};
-var MAP_FIG = {_serialize_fig(map_fig)};
-var GDD_FIG = {gdd_serialized};
-var PRECIP_FIG = {precip_serialized};
-var SOIL_FIG = {_serialize_fig(soil_fig)};
+var DASHBOARD_DATA = {client_data_json};
+var RECOMMENDATIONS = {recommendations_json};
+var BASEMAP_B64 = {basemap_json};
+var ALL_YEARS = {years_json};
+var COLOR_PALETTE = {json.dumps(COLOR_PALETTE)};
 
-function renderAll() {{
-  Plotly.react("ndvi-chart", NDVI_FIG.data, NDVI_FIG.layout, {{responsive:true}});
-  Plotly.react("om-chart", OM_FIG.data, OM_FIG.layout, {{responsive:true}});
-  Plotly.react("map-chart", MAP_FIG.data, MAP_FIG.layout, {{responsive:true}});
-  Plotly.react("gdd-chart", GDD_FIG.data, GDD_FIG.layout, {{responsive:true}});
-  Plotly.react("precip-chart", PRECIP_FIG.data, PRECIP_FIG.layout, {{responsive:true}});
-  Plotly.react("soil-chart", SOIL_FIG.data, SOIL_FIG.layout, {{responsive:true}});
+function getFieldColor(fid) {{
+  var h = 0, i;
+  for (i = 0; i < fid.length; i++) h = ((h << 5) - h) + fid.charCodeAt(i), h |= 0;
+  return COLOR_PALETTE[Math.abs(h) % COLOR_PALETTE.length];
 }}
 
-document.addEventListener("DOMContentLoaded", function() {{
-  renderAll();
+function getField(fid) {{
+  for (var i = 0; i < DASHBOARD_DATA.fields.length; i++) {{
+    if (DASHBOARD_DATA.fields[i].fieldId === fid) return DASHBOARD_DATA.fields[i];
+  }}
+  return null;
+}}
 
+// ── Map layer coloring ─────────────────────────────────────────
+function getMetricValue(field, metric) {{
+  switch(metric) {{
+    case "soilHealth": return field.soilScore || 50;
+    case "ndvi": return (field.avgNdvi || 0) * 100;
+    case "om": return field.omPct || 0;
+    case "ph": return field.ph || 7;
+    case "drainage": {{
+      var d = (field.drainage || "").toLowerCase();
+      if (d.includes("well") && !d.includes("poorly")) return 90;
+      if (d.includes("moderately")) return 70;
+      if (d.includes("somewhat poorly")) return 50;
+      if (d.includes("poorly")) return 30;
+      if (d.includes("very poorly")) return 10;
+      return 50;
+    }}
+  }}
+  return 50;
+}}
+
+function getMetricColor(value, metric) {{
+  var norm;
+  switch(metric) {{
+    case "soilHealth": norm = Math.max(0, Math.min(100, value)) / 100; break;
+    case "ndvi": norm = Math.max(0, Math.min(100, value)) / 100; break;
+    case "om": norm = Math.max(0, Math.min(8, value)) / 8; break;
+    case "ph": {{
+      var dist = Math.abs(value - 6.5);
+      norm = Math.max(0, 1 - dist / 3); break;
+    }}
+    case "drainage": norm = Math.max(0, Math.min(100, value)) / 100; break;
+    default: norm = 0.5;
+  }}
+  var r = Math.round(255 * (1 - norm));
+  var g = Math.round(255 * norm);
+  return "rgb(" + r + "," + g + ",50)";
+}}
+
+function getMetricLabel(metric) {{
+  switch(metric) {{
+    case "soilHealth": return "Soil Health Score";
+    case "ndvi": return "Avg NDVI (x100)";
+    case "om": return "Organic Matter %";
+    case "ph": return "pH";
+    case "drainage": return "Drainage Quality";
+  }}
+  return metric;
+}}
+
+// ── Map builder ────────────────────────────────────────────────
+function buildMapTraces(metric) {{
+  var traces = [];
+  var fields = DASHBOARD_DATA.fields;
+  for (var i = 0; i < fields.length; i++) {{
+    var f = fields[i];
+    var polys = f.polygons;
+    if (!polys || polys.length === 0) continue;
+    var val = getMetricValue(f, metric);
+    var fillColor = getMetricColor(val, metric);
+    for (var p = 0; p < polys.length; p++) {{
+      var coords = polys[p];
+      var xs = coords.map(function(c) {{ return c[0]; }});
+      var ys = coords.map(function(c) {{ return c[1]; }});
+      var hover = "<b>" + f.fieldId + "</b><br>" +
+        "Acres: " + f.acres.toFixed(1) + "<br>" +
+        getMetricLabel(metric) + ": " + (metric === "ndvi" ? (f.avgNdvi ? f.avgNdvi.toFixed(3) : "N/A") :
+         metric === "ph" ? (f.ph ? f.ph.toFixed(2) : "N/A") :
+         metric === "om" ? (f.omPct ? f.omPct.toFixed(1) + "%" : "N/A") :
+         metric === "drainage" ? (f.drainage || "N/A") :
+         val.toFixed(1)) + "<br>" +
+        "Soil Health: " + (f.soilScore ? f.soilScore.toFixed(1) : "N/A");
+      traces.push({{
+        x: xs, y: ys, fill: "toself", fillcolor: fillColor,
+        line: {{color: "#333", width: 1.5}}, mode: "lines",
+        type: "scatter", name: f.fieldId.slice(-12), text: hover, hoverinfo: "text", showlegend: false,
+        customdata: f.fieldId,
+      }});
+    }}
+  }}
+  return traces;
+}}
+
+function buildMapLayout(metric, extent) {{
+  var layout = {{
+    dragmode: "pan", hovermode: "closest",
+    xaxis: {{visible: false, showgrid: false, zeroline: false, scaleanchor: "y", scaleratio: 1}},
+    yaxis: {{visible: false, showgrid: false, zeroline: false}},
+    margin: {{l: 0, r: 0, t: 30, b: 0}},
+    paper_bgcolor: "#f4f5f7", plot_bgcolor: "#f4f5f7",
+    title: {{text: "Fields Colored by " + getMetricLabel(metric), font: {{size: 13}}, x: 0.5, xanchor: "center"}},
+  }};
+  if (BASEMAP_B64) {{
+    layout.images = [{{
+      source: "data:image/png;base64," + BASEMAP_B64,
+      xref: "x", yref: "y", x: 0, y: 0, sizex: 1, sizey: 1,
+      xanchor: "left", yanchor: "bottom", sizing: "stretch", layer: "below", opacity: 1,
+    }}];
+  }}
+  if (extent) {{
+    layout.xaxis.range = [extent[0], extent[1]];
+    layout.yaxis.range = [extent[2], extent[3]];
+  }}
+  return layout;
+}}
+
+function computeExtent(fields) {{
+  var xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+  for (var i = 0; i < fields.length; i++) {{
+    var polys = fields[i].polygons;
+    if (!polys) continue;
+    for (var p = 0; p < polys.length; p++) {{
+      for (var c = 0; c < polys[p].length; c++) {{
+        var x = polys[p][c][0], y = polys[p][c][1];
+        if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+        if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+      }}
+    }}
+  }}
+  var bx = (xmax - xmin) * 0.2, by = (ymax - ymin) * 0.2;
+  if (bx < 1) bx = 1; if (by < 1) by = 1;
+  return [xmin - bx, xmax + bx, ymin - by, ymax + by];
+}}
+
+// ── NDVI chart builder (interactive) ──────────────────────────
+function buildNdviTraces(selectedFields) {{
+  var fields = DASHBOARD_DATA.fields;
+  if (selectedFields && selectedFields.length > 0) {{
+    fields = fields.filter(function(f) {{ return selectedFields.indexOf(f.fieldId) >= 0; }});
+  }}
+  fields = fields.slice().sort(function(a, b) {{ return (b.avgNdvi || 0) - (a.avgNdvi || 0); }});
+  var labels = fields.map(function(f) {{ return f.fieldId.slice(-12); }});
+  var cornData = fields.map(function(f) {{ return f.cornNdvi || 0; }});
+  var soyData = fields.map(function(f) {{ return f.soyNdvi || 0; }});
+  return {{
+    data: [
+      {{type: "bar", name: "Corn", x: labels, y: cornData, marker: {{color: "#d62728", opacity: 0.8}},
+        hovertemplate: "<b>%{{x}}</b><br>Corn NDVI: %{{y:.3f}}<extra></extra>",
+        customdata: fields.map(function(f) {{ return f.fieldId; }})}},
+      {{type: "bar", name: "Soybean", x: labels, y: soyData, marker: {{color: "#2ca02c", opacity: 0.8}},
+        hovertemplate: "<b>%{{x}}</b><br>Soybean NDVI: %{{y:.3f}}<extra></extra>",
+        customdata: fields.map(function(f) {{ return f.fieldId; }})}},
+    ],
+    layout: {{
+      barmode: "group", title: {{text: "Mean NDVI by Field and Crop Type", font: {{size: 14}}}},
+      xaxis: {{title: "Field", tickangle: -45}},
+      yaxis: {{title: "Mean NDVI", range: [0, 0.7]}},
+      margin: {{l: 50, r: 20, t: 50, b: 80}},
+      legend: {{orientation: "h", y: 1.05, x: 0.5, xanchor: "center"}},
+      paper_bgcolor: "#fff", plot_bgcolor: "#fff", hovermode: "x unified",
+    }}
+  }};
+}}
+
+// ── Weather chart builder (interactive) ───────────────────────
+function buildGddTraces(selectedFields, selectedYear) {{
+  var traces = [];
+  var weather = DASHBOARD_DATA.weather;
+  for (var i = 0; i < selectedFields.length; i++) {{
+    var fid = selectedFields[i];
+    var w = weather[fid];
+    if (!w || !w[selectedYear]) continue;
+    var daily = w[selectedYear];
+    var doys = daily.map(function(d) {{ return d.doy; }});
+    var gdd = daily.map(function(d) {{ return d.gdd_cumul; }});
+    var color = getFieldColor(fid);
+    traces.push({{
+      type: "scatter", mode: "lines", name: fid.slice(-12),
+      x: doys, y: gdd, line: {{color: color, width: 2}},
+      hovertemplate: "<b>" + fid.slice(-12) + "</b><br>DOY: %{{x}}<br>GDD: %{{y:.0f}}<extra></extra>",
+    }});
+  }}
+  if (traces.length === 0) {{
+    traces.push({{type: "scatter", x: [], y: [], mode: "text", text: ["No data"], hoverinfo: "skip", showlegend: false}});
+  }}
+  return traces;
+}}
+
+function buildPrecipTraces(selectedFields, selectedYear) {{
+  var traces = [];
+  var weather = DASHBOARD_DATA.weather;
+  for (var i = 0; i < selectedFields.length; i++) {{
+    var fid = selectedFields[i];
+    var w = weather[fid];
+    if (!w || !w[selectedYear]) continue;
+    var daily = w[selectedYear];
+    var doys = daily.map(function(d) {{ return d.doy; }});
+    var rain = daily.map(function(d) {{ return d.precip_in; }});
+    var color = getFieldColor(fid);
+    traces.push({{
+      type: "bar", name: fid.slice(-12), x: doys, y: rain,
+      marker: {{color: color, opacity: 0.35}},
+      hovertemplate: "<b>" + fid.slice(-12) + "</b><br>DOY: %{{x}}<br>Rain: %{{y:.2f}} in<extra></extra>",
+    }});
+  }}
+  if (traces.length === 0) {{
+    traces.push({{type: "bar", x: [], y: [], name: "", hoverinfo: "skip", showlegend: false}});
+  }}
+  return traces;
+}}
+
+// ── Global render function ────────────────────────────────────
+var currentMapMetric = "soilHealth";
+var currentMapExtent = null;
+var ndviCompareMode = false;
+
+function renderAll() {{
+  // NDVI chart
+  var ndviSel = document.getElementById("ndvi-field-filter");
+  var ndviFids = [];
+  if (ndviSel) {{
+    for (var i = 0; i < ndviSel.options.length; i++) {{
+      if (ndviSel.options[i].selected) ndviFids.push(ndviSel.options[i].value);
+    }}
+  }}
+  var ndviFig = buildNdviTraces(ndviFids.length > 0 ? ndviFids : null);
+  Plotly.react("ndvi-chart", ndviFig.data, ndviFig.layout, {{responsive: true}});
+
+  // Map
+  var mapTraces = buildMapTraces(currentMapMetric);
+  var extent = computeExtent(DASHBOARD_DATA.fields);
+  var mapLayout = buildMapLayout(currentMapMetric, extent);
+  Plotly.react("map-chart", mapTraces, mapLayout, {{responsive: true}});
+
+  // Weather
+  var wfSel = document.getElementById("weather-field-filter");
+  var wfFids = [];
+  if (wfSel) {{
+    for (var i = 0; i < wfSel.options.length; i++) {{
+      if (wfSel.options[i].selected) wfFids.push(wfSel.options[i].value);
+    }}
+  }}
+  var yearSel = document.getElementById("weather-year-select");
+  var wYear = yearSel ? parseInt(yearSel.value) : ALL_YEARS[ALL_YEARS.length - 1];
+  if (wfFids.length === 0) wfFids = DASHBOARD_DATA.fields.map(function(f) {{ return f.fieldId; }});
+
+  var gddTraces = buildGddTraces(wfFids, wYear);
+  var gddLayout = {{
+    title: {{text: "Cumulative GDD (base 10°C)", font: {{size: 14}}}},
+    xaxis: {{title: "Day of Year", dtick: 30, range: [60, 330]}},
+    yaxis: {{title: "Cumulative GDD (°C-days)"}},
+    margin: {{l: 50, r: 20, t: 40, b: 50}},
+    legend: {{orientation: "h", y: 1.05, x: 0, font: {{size: 9}}}},
+    paper_bgcolor: "#fff", plot_bgcolor: "#fff", hovermode: "x unified",
+  }};
+  Plotly.react("gdd-chart", gddTraces, gddLayout, {{responsive: true}});
+
+  var precipTraces = buildPrecipTraces(wfFids, wYear);
+  var precipLayout = {{
+    title: {{text: "Daily Precipitation (inches)", font: {{size: 14}}}},
+    xaxis: {{title: "Day of Year", dtick: 30, range: [60, 330]}},
+    yaxis: {{title: "Precipitation (in)"}},
+    margin: {{l: 50, r: 20, t: 40, b: 50}},
+    legend: {{orientation: "h", y: 1.05, x: 0, font: {{size: 9}}}},
+    paper_bgcolor: "#fff", plot_bgcolor: "#fff", hovermode: "x unified", barmode: "overlay",
+  }};
+  Plotly.react("precip-chart", precipTraces, precipLayout, {{responsive: true}});
+
+  // Soil chart (static)
+  Plotly.react("om-chart", OM_FIG.data, OM_FIG.layout, {{responsive: true}});
+  Plotly.react("soil-chart", SOIL_FIG.data, SOIL_FIG.layout, {{responsive: true}});
+}}
+
+// ── NDVI compare mode: click a bar to highlight field ─────────
+function setupNdviCompare() {{
+  var chart = document.getElementById("ndvi-chart");
+  var btn = document.getElementById("ndvi-compare-btn");
+  var selected = [];
+
+  chart.on("plotly_click", function(evt) {{
+    if (!ndviCompareMode) return;
+    if (!evt.points || evt.points.length === 0) return;
+    var fid = evt.points[0].customdata;
+    if (!fid) return;
+    var idx = selected.indexOf(fid);
+    if (idx >= 0) {{
+      selected.splice(idx, 1);
+    }} else if (selected.length < 2) {{
+      selected.push(fid);
+    }}
+    if (selected.length === 2) {{
+      var f1 = getField(selected[0]);
+      var f2 = getField(selected[1]);
+      alert("Comparison: " + selected[0].slice(-12) + " vs " + selected[1].slice(-12) +
+        "\\nNDVI: " + (f1.avgNdvi ? f1.avgNdvi.toFixed(3) : "N/A") + " vs " + (f2.avgNdvi ? f2.avgNdvi.toFixed(3) : "N/A") +
+        "\\nSoil Health: " + (f1.soilScore || "N/A") + " vs " + (f2.soilScore || "N/A") +
+        "\\nOM: " + (f1.omPct || "N/A") + "% vs " + (f2.omPct || "N/A") + "%" +
+        "\\nAcres: " + f1.acres.toFixed(1) + " vs " + f2.acres.toFixed(1));
+      selected = [];
+      ndviCompareMode = false;
+      btn.textContent = "Compare 2 Fields";
+      btn.classList.remove("active");
+    }}
+  }});
+
+  btn.addEventListener("click", function() {{
+    ndviCompareMode = !ndviCompareMode;
+    btn.classList.toggle("active");
+    btn.textContent = ndviCompareMode ? "Click 2 fields to compare" : "Compare 2 Fields";
+  }});
+}}
+
+// ── Populate filter dropdowns ─────────────────────────────────
+function populateFilters() {{
+  var fields = DASHBOARD_DATA.fields;
+  var ndviSel = document.getElementById("ndvi-field-filter");
+  var wfSel = document.getElementById("weather-field-filter");
+  var yearSel = document.getElementById("weather-year-select");
+
+  if (ndviSel) {{
+    for (var i = 0; i < fields.length; i++) {{
+      var opt = document.createElement("option");
+      opt.value = fields[i].fieldId;
+      opt.text = fields[i].fieldId.slice(-12);
+      ndviSel.appendChild(opt);
+    }}
+    ndviSel.addEventListener("change", function() {{
+      renderAll();
+      document.getElementById("ndvi-sel-count").textContent = ndviSel.selectedOptions.length + " selected";
+    }});
+  }}
+
+  if (wfSel) {{
+    for (var i = 0; i < fields.length; i++) {{
+      var opt = document.createElement("option");
+      opt.value = fields[i].fieldId;
+      opt.text = fields[i].fieldId.slice(-12);
+      wfSel.appendChild(opt);
+    }}
+    for (var i = 0; i < wfSel.options.length; i++) wfSel.options[i].selected = true;
+    wfSel.addEventListener("change", function() {{
+      renderAll();
+      document.getElementById("weather-sel-count").textContent = wfSel.selectedOptions.length + " fields";
+    }});
+  }}
+
+  if (yearSel) {{
+    for (var i = 0; i < ALL_YEARS.length; i++) {{
+      var opt = document.createElement("option");
+      opt.value = ALL_YEARS[i];
+      opt.text = String(ALL_YEARS[i]);
+      yearSel.appendChild(opt);
+    }}
+    yearSel.value = String(ALL_YEARS[ALL_YEARS.length - 1]);
+    yearSel.addEventListener("change", function() {{ renderAll(); }});
+  }}
+}}
+
+// ── Map layer control ─────────────────────────────────────────
+function setupMapLayers() {{
+  var container = document.querySelector("#section-map .controls-bar .filter-group");
+  if (!container) return;
+  container.addEventListener("click", function(e) {{
+    var btn = e.target.closest(".map-layer-btn");
+    if (!btn) return;
+    container.querySelectorAll(".map-layer-btn").forEach(function(b) {{ b.classList.remove("active"); }});
+    btn.classList.add("active");
+    currentMapMetric = btn.getAttribute("data-metric");
+    renderAll();
+  }});
+}}
+
+// ── Nav setup ─────────────────────────────────────────────────
+function setupNav() {{
   var nav = document.getElementById("nav");
   nav.addEventListener("click", function(e) {{
     var btn = e.target.closest("button");
@@ -931,10 +1443,21 @@ document.addEventListener("DOMContentLoaded", function() {{
     document.querySelectorAll(".section").forEach(function(s) {{ s.classList.remove("active"); }});
     var target = document.getElementById("section-" + section);
     if (target) target.classList.add("active");
-    if (section === "map") {{
-      Plotly.Plots.resize(document.getElementById("map-chart"));
-    }}
+    if (section === "map") Plotly.Plots.resize(document.getElementById("map-chart"));
   }});
+}}
+
+// ── OM and Soil static figures ────────────────────────────────
+var OM_FIG = {om_serialized};
+var SOIL_FIG = {soil_serialized};
+
+// ── Init ──────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", function() {{
+  populateFilters();
+  setupNav();
+  setupMapLayers();
+  setupNdviCompare();
+  renderAll();
 }});
 </script>
 <script>{plotly_js}</script>
@@ -1144,9 +1667,50 @@ def main() -> None:
     insights = _generate_insights(all_fields)
     interpretation_html = _build_interpretation_html(insights)
 
+    print("   Generating recommendations...")
+    recommendations = _generate_recommendations(all_fields)
+    recommendations_html = _build_recommendations_html(recommendations)
+
     # 5. Vendor Plotly
     print("\n5. Vendoring Plotly.js...")
     plotly_js = vendor_plotly(args.plotly_cache)
+
+    # 5b. Build client-side data JSON
+    fields_json = []
+    weather_json = {}
+    soil_json = {}
+    for f in all_fields:
+        fid = f["field_id"]
+        sh = f.get("soil_health", {})
+        cards = f.get("ndvi_cards", {})
+        corn_ndvi = cards.get("corn", {}).get("mean_ndvi") if isinstance(cards.get("corn"), dict) else None
+        soy_ndvi = cards.get("soybean", {}).get("mean_ndvi") if isinstance(cards.get("soybean"), dict) else None
+        fields_json.append({
+            "fieldId": fid,
+            "acres": f["acres"],
+            "avgNdvi": f["avg_ndvi"],
+            "cornNdvi": corn_ndvi,
+            "soyNdvi": soy_ndvi,
+            "soilScore": sh.get("score"),
+            "omPct": sh.get("om_pct"),
+            "ph": sh.get("ph"),
+            "cec": sh.get("cec"),
+            "drainage": sh.get("drainage_class", ""),
+            "polygons": f["mercator_polygons"],
+        })
+        # Per-field weather by year
+        wdf = f.get("weather_df")
+        if wdf is not None and not wdf.empty:
+            wkey = fid
+            weather_json[wkey] = {}
+            for y in sorted_years:
+                recs = compute_field_year_gdd(wdf, y)
+                if recs:
+                    weather_json[wkey][y] = recs
+
+    client_data_json = json.dumps({"fields": fields_json, "weather": weather_json}, indent=None, separators=(",", ":"))
+    recommendations_json = json.dumps(recommendations, indent=None, separators=(",", ":"))
+    basemap_json = json.dumps(basemap_b64) if basemap_b64 else "null"
 
     # 6. Build and write dashboard
     print("\n6. Rendering dashboard HTML...")
@@ -1162,6 +1726,11 @@ def main() -> None:
         interpretation_html=interpretation_html,
         plotly_js=plotly_js,
         all_fields=all_fields,
+        client_data_json=client_data_json,
+        recommendations_html=recommendations_html,
+        recommendations_json=recommendations_json,
+        basemap_json=basemap_json,
+        sorted_years=sorted_years,
     )
 
     if args.output:
