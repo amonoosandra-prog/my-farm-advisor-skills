@@ -964,6 +964,7 @@ def build_dashboard_html(
       </div>
       <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Comparing mean NDVI values for corn and soybean. Select fields above to filter. Click "Compare 2 Fields", then click two fields on the chart to overlay.</p>
       <div class="chart-plot" id="ndvi-chart"></div>
+      <div class="interpretation">This chart compares mean NDVI values for corn and soybean across all fields. Higher bars indicate healthier vegetation. Use the field filter to focus on specific fields. Fields with low NDVI despite good soil scores may need management attention.</div>
     </div>
   </div>
 
@@ -972,6 +973,7 @@ def build_dashboard_html(
       <h2>Exploratory Visualization 2: Soil Organic Matter vs NDVI</h2>
       <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Scatter plot showing the relationship between soil organic matter content and average NDVI. Points are colored by drainage class. The dashed trendline shows the overall correlation.</p>
       <div class="chart-plot" id="om-chart"></div>
+      <div class="interpretation">This scatter plot shows the relationship between soil organic matter and NDVI. The trendline typically slopes upward — higher organic matter supports better crop health. Points are colored by drainage class to reveal how soil drainage affects this relationship.</div>
     </div>
   </div>
 
@@ -989,6 +991,7 @@ def build_dashboard_html(
       </div>
       <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Interactive map with satellite basemap. Click layer buttons to toggle between metrics. Hover over fields for details.</p>
       <div class="chart-plot" id="map-chart" style="height:600px"></div>
+      <div class="interpretation">Fields are colored using a green-yellow-red gradient based on the selected metric. Use the layer buttons to switch between Soil Health, NDVI, Organic Matter, pH, and Drainage. Darker green fields score higher; redder fields need attention. The satellite basemap provides geographic context for identifying spatial patterns.</div>
     </div>
   </div>
 
@@ -1002,11 +1005,13 @@ def build_dashboard_html(
       <h2>Weather & Climate Analysis: Cumulative GDD</h2>
       <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Growing Degree Day accumulation curves for selected fields and year. Use filters above to change selection.</p>
       <div class="chart-plot" id="gdd-chart" style="height:350px"></div>
+      <div class="interpretation">GDD curves show how heat accumulated across the growing season for each field. Steeper curves mean faster thermal time accumulation. Compare fields to see if some are lagging behind, which could delay crop maturity. The year selector lets you compare different seasons.</div>
     </div>
     <div class="chart-container">
       <h2>Weather & Climate Analysis: Daily Precipitation</h2>
       <p style="color:#64748b;font-size:0.85rem;margin-bottom:0.75rem">Daily precipitation distribution for selected fields and year.</p>
       <div class="chart-plot" id="precip-chart" style="height:350px"></div>
+      <div class="interpretation">Daily rainfall bars show precipitation timing and intensity across the growing season. Large spikes indicate heavy rain events that could cause flooding or erosion. Compare across fields to see if rainfall patterns are consistent across the farm.</div>
     </div>
   </div>
 
@@ -1018,6 +1023,7 @@ def build_dashboard_html(
         Higher scores indicate better overall soil quality for row crop production.
       </p>
       <div class="chart-plot" id="soil-chart"></div>
+      <div class="interpretation">The stacked bars break down each field's Soil Health Score into four components: Organic Matter (brown), pH (orange), Drainage (blue), and CEC (green). The number above each bar is the total composite score out of 100. Focus on the weakest component in each field for targeted soil improvement.</div>
     </div>
   </div>
 
